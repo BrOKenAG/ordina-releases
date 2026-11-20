@@ -1,10 +1,20 @@
 # ordina
 
-面向 DaVinci Resolve 剪辑工作流的 macOS 工具。按模板建立项目目录、创建并关联 Resolve 工程，配合 Project Setup 管理工程初始化和素材归档。
+[中文](README.md) · [English](README.en.md)
+
+为 DaVinci Resolve 剪辑师简化项目搭建和素材整理的 macOS 工具。创建项目文件夹、关联 Resolve 工程，并在剪辑过程中自动整理符合条件的外部素材。
+
+**让项目从一开始就井然有序。**
 
 当前发布版本为 **1.9.1（29）**，Project Setup 为 **v2.3**。
 
 [下载安装包](https://github.com/BrOKenAG/ordina-releases/releases/latest) · [提交问题](https://github.com/BrOKenAG/ordina-releases/issues)
+
+## 适合什么场景
+
+- 每次新建项目都要重复建立相同的文件夹和 Resolve 工程。
+- 剪辑时使用了下载文件夹、桌面或外置磁盘里的素材，希望项目文件更容易管理。
+- 希望在 Resolve 中集中完成工程初始化和查看素材归档状态。
 
 ## 系统要求
 
