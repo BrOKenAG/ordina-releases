@@ -1,0 +1,20 @@
+<?xml version="1.0" standalone="yes"?><!-- sparkle-sign-warning:
+IMPORTANT: This file was signed by Sparkle. Any modifications to this file requires re-signing this file with generate_appcast or sign_update! The signed signature will be embedded at the end of this file.
+--><rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" version="2.0">
+    <channel>
+        <title>ordina</title>
+        <item>
+            <title>1.9.1</title>
+            <pubDate>Fri, 20 Nov 2026 15:51:35 +0800</pubDate>
+            <link>https://github.com/BrOKenAG/ordina-releases/releases</link>
+            <sparkle:version>29</sparkle:version>
+            <sparkle:shortVersionString>1.9.1</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>26.0</sparkle:minimumSystemVersion>
+            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
+            <enclosure url="https://github.com/BrOKenAG/ordina-releases/releases/download/v1.9.1-build.29/ordina-1.9.1-build.29.dmg" length="2069693" type="application/octet-stream" sparkle:edSignature="yF2jJwfp020L4t9haPXSpyN54tnQ0h0alX4iF7PWRJJAlegGbwimUuL2r2yvSjq9hpMLFAJXc5azaUhPDETYCA=="></enclosure>
+        </item>
+    </channel>
+</rss><!-- sparkle-signatures:
+edSignature: 4ncSwSq6ykXzfOamu7aXwFWffZHNQhP/m24E1uVcfq+wM8PN0N+QhSBVVdILcAOfj0LAIsxeG0HKwnucXG8/CQ==
+length: 1220
+-->
