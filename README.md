@@ -1,13 +1,109 @@
 # ordina
 
-macOS 26+ · Apple silicon
+面向 DaVinci Resolve 剪辑工作流的 macOS 工具。按模板建立项目目录、创建并关联 Resolve 工程，配合 Project Setup 管理工程初始化和素材归档。
 
-[下载最新版本](https://github.com/BrOKenAG/ordina-releases/releases/latest)
+当前发布版本为 **1.9.1（29）**，Project Setup 为 **v2.3**。
 
-输入项目名称，按模板建立文件夹，可同步创建 DaVinci Resolve 工程。Project Setup 用于工程初始化和素材归档。
+[下载安装包](https://github.com/BrOKenAG/ordina-releases/releases/latest) · [提交问题](https://github.com/BrOKenAG/ordina-releases/issues)
 
-首次安装后，将 ordina 拖入“应用程序”。后续可在“设置 → 检查更新”中更新。
+## 系统要求
 
-当前为未公证的免费内测版本，首次启动可能需要在系统设置中确认打开。
+- Apple 芯片 Mac，macOS 26 或更新版本。
+- 创建文件夹可以独立使用。
+- Resolve 工程创建及插件功能需要 DaVinci Resolve Studio，并将「偏好设置 → 系统 → 常规 → 外部脚本使用」设为「本地」。
+- Resolve 连接组件使用系统 `/usr/bin/python3`。若系统提示缺少开发工具，先安装 Xcode 命令行工具。
 
-本仓库保存安装包、版本说明和签名更新清单。
+## 安装与使用
+
+1. 下载 DMG，将 `ordina.app` 拖入「应用程序」。
+2. 首次打开时选择默认保存位置、已有 Resolve 项目库，并按需安装插件。也可以稍后到设置中完成。
+3. 在首页输入项目名称，点击「+新建」，选择保存位置和文件夹模板。
+4. 按需开启「同步创建 Resolve 工程」，登记原始素材目录，或选择「稍后设置」。
+
+同步创建前，请在 Resolve 中切换到所选项目库，并保存、关闭当前正式工程。创建完成后，ordina 会尝试打开新工程的 Project Setup 窗口。
+
+当前安装包采用临时签名，尚未经过 Apple 公证。首次打开可能需要到「系统设置 → 隐私与安全性」确认打开。
+
+## 功能
+
+| 功能 | 用途 |
+| --- | --- |
+| 项目目录 | 自定义文件夹模板、记住保存位置，支持本地磁盘、外置盘和已挂载 NAS |
+| Resolve 工程 | 支持已登记的本地及 PostgreSQL 项目库，保存工程关联，按关联打开工程 |
+| 全部项目 | 查看项目目录，打开文件夹或已关联的 Resolve 工程 |
+| 插件管理 | 查看已安装脚本，安装内置插件，拖入或选择 `.py` 脚本安装到 Resolve |
+| 素材归档 | 登记原始素材位置，扫描临时素材，复制、校验后更新 Resolve 引用 |
+| 软件更新 | 在设置或应用菜单检查更新，可选择自动检查，更新包与清单均校验签名 |
+
+### Resolve 插件
+
+| 插件 | 用途 |
+| --- | --- |
+| Project Setup | 设置分辨率与帧率、建立媒体池模板及锁帧时间线、查看归档状态 |
+| Import YueLiu | 导入阅流导出的审片意见，筛选意见并跟踪处理状态 |
+| Multicam Tools | 角度命名与多机位合板操作 |
+
+在「设置 → 插件管理」安装。安装后从 Resolve 的「工作区 → 脚本 → Utility」打开；菜单未刷新时重启 Resolve。Import YueLiu 需要在 Resolve 使用的 Python 环境中安装 `openpyxl`。
+
+### 素材归档
+
+在 Project Setup 中打开「归档状态」，可以手动扫描、登记素材位置、启用自动归档和调整扫描间隔。后台扫描默认间隔为 5 秒。
+
+登记为原始素材的目录保留引用。自动归档在时间线停稳等条件满足后处理符合策略的临时素材，复制并校验成功后才重链接；源文件保留，同名不同内容的文件使用独立目录。序列帧、多文件素材包等无法安全处理的情况需要人工确认。
+
+### 项目命名
+
+以 2026 年 11 月 20 日创建「示例项目」为例：
+
+```text
+磁盘目录    20261120_示例项目/
+Resolve     2026/Q4/1120_示例项目/示例项目
+```
+
+也可以输入 `20261120_示例项目`，明确指定日期。Resolve 中的项目分组使用 `MMDD_项目名`，该层不重复年份。
+
+## 从源码构建
+
+需要完整 Xcode 26 或更新版本、命令行工具和 Python 3。Swift Package Manager 会获取固定版本的 Sparkle 2.10.1。
+
+```sh
+git clone https://github.com/BrOKenAG/ordina-releases.git ordina
+cd ordina
+python3 scripts/build_app.py --output dist/ordina.app
+```
+
+也可以用 Xcode 打开 `Ordina.xcodeproj`，选择共享 Scheme `Ordina`。构建脚本默认输出到桌面；指定 `--output` 可以改变位置。
+
+生成 DMG 还需要 Python 3.10 或更新版本及打包依赖：
+
+```sh
+python3 -m pip install --target .build/dmg-libs -r requirements-build.txt
+python3 scripts/build_distribution.py --output dist --release-label build.29
+```
+
+运行验证：
+
+```sh
+python3 scripts/verify.py
+python3 Tests/verify_app.py dist/ordina.app
+```
+
+测试使用临时目录和替代 Resolve 对象。App 构建与签名验证单独执行。
+
+## 源码结构
+
+```text
+Ordina.xcodeproj/       Xcode 工程、共享 Scheme 和依赖锁定
+Ordina/                SwiftUI 界面、Resolve 连接与归档服务
+  Design/              主题、控件和图标几何
+Integrations/           Project Setup 及可选 Resolve 插件
+config/Info.plist       更新地址、验证公钥与更新偏好默认值
+scripts/               构建、DMG 打包、验证和更新清单生成
+Tests/                 Python 回归测试与 Swift 验证
+design/                当前图标母版及生成说明
+installer/             DMG 安装背景
+docs/                  发布流程、数据兼容与使用说明
+appcast.xml            已发布版本的签名更新清单
+```
+
+发布更新的方法见 [发布说明](docs/releases.md)。早期标识、数据文件和脚本兼容关系见 [数据兼容说明](docs/compatibility.md)。使用与数据处理说明见 [使用说明](docs/usage-notice.md)，第三方授权见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
