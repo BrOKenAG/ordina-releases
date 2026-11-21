@@ -35,6 +35,7 @@ def main():
     args = parser.parse_args()
     filename = FILES[args.plugin]
     source = ROOT / 'Integrations/OptionalPlugins' / filename
+    asset_name = args.plugin + '.py'
     data = source.read_bytes()
     ver = version(data)
     tag = f'plugin-{args.plugin}-v{ver}'
@@ -54,6 +55,8 @@ def main():
     with tempfile.TemporaryDirectory(prefix='ordina-plugin-release-') as temporary:
         tmp = Path(temporary)
         payload_path = tmp / 'payload.json'
+        asset = tmp / asset_name
+        asset.write_bytes(data)
         document = {'format': 1, 'plugins': {}}
         if FEED.exists():
             envelope = json.loads(FEED.read_text(encoding='utf-8'))
@@ -67,7 +70,7 @@ def main():
             raise ValueError('插件版本必须高于已发布版本。')
         document['plugins'][args.plugin] = {
             'version': ver,
-            'url': f'https://github.com/{REPOSITORY}/releases/download/{tag}/{quote(filename)}',
+            'url': f'https://github.com/{REPOSITORY}/releases/download/{tag}/{quote(asset_name)}',
             'sha256': hashlib.sha256(data).hexdigest(),
         }
         payload_path.write_bytes(json.dumps(document, ensure_ascii=False, sort_keys=True, separators=(',', ':')).encode())
@@ -79,12 +82,14 @@ def main():
                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0
         if exists:
             # A retry may reuse an already uploaded asset only when it is identical.
+            downloaded = tmp / 'downloaded'
+            downloaded.mkdir()
             run('gh', 'release', 'download', tag, '--repo', REPOSITORY,
-                '--pattern', filename, '--dir', str(tmp))
-            if (tmp / filename).read_bytes() != data:
+                '--pattern', asset_name, '--dir', str(downloaded))
+            if (downloaded / asset_name).read_bytes() != data:
                 raise ValueError('该版本已有不同的发布文件，请递增版本号。')
         else:
-            run('gh', 'release', 'create', tag, str(source), '--repo', REPOSITORY,
+            run('gh', 'release', 'create', tag, str(asset), '--repo', REPOSITORY,
                 '--title', f'{filename[:-3]} v{ver}', '--notes', f'{filename[:-3]} v{ver}', '--latest=false')
         FEED.parent.mkdir(parents=True, exist_ok=True)
         FEED.write_text(json.dumps(envelope, ensure_ascii=False, separators=(',', ':')) + '\n', encoding='utf-8')

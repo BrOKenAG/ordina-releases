@@ -11,11 +11,12 @@ enum PluginUpdates {
     private struct Payload: Decodable { let format: Int; let plugins: [String: Entry] }
     private struct Envelope: Decodable { let payload: String; let signature: String }
     enum Failure: LocalizedError {
-        case invalid, unavailable
+        case invalid, unavailable, notPublished
         var errorDescription: String? {
             switch self {
             case .invalid: return "插件更新校验失败。"
             case .unavailable: return "无法检查插件更新。"
+            case .notPublished: return "暂无在线版本。"
             }
         }
     }
@@ -29,8 +30,9 @@ enum PluginUpdates {
               let key = try? Curve25519.Signing.PublicKey(rawRepresentation: publicKey),
               key.isValidSignature(signature, for: payload) else { throw Failure.invalid }
         let document = try JSONDecoder().decode(Payload.self, from: payload)
-        guard document.format == 1, let entry = document.plugins[plugin.id],
-              validVersion(entry.version), entry.sha256.range(of: "^[0-9a-f]{64}$", options: .regularExpression) != nil,
+        guard document.format == 1 else { throw Failure.invalid }
+        guard let entry = document.plugins[plugin.id] else { throw Failure.notPublished }
+        guard validVersion(entry.version), entry.sha256.range(of: "^[0-9a-f]{64}$", options: .regularExpression) != nil,
               let url = URL(string: entry.url), url.scheme == "https", url.host == "github.com",
               url.user == nil, url.password == nil, url.port == nil, url.query == nil, url.fragment == nil,
               url.path.hasPrefix("/BrOKenAG/ordina-releases/releases/download/") else { throw Failure.invalid }

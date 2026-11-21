@@ -14,6 +14,7 @@ import CryptoKit
         precondition(entry.version == "2.1")
         try PluginUpdates.verifyScript(script, entry: entry)
         do { try PluginUpdates.verifyScript(Data("tampered".utf8), entry: entry); fatalError("tampering accepted") } catch {}
+        do { _ = try PluginUpdates.verifiedEntry(envelope, plugin: .yueliu, publicKey: key.publicKey.rawRepresentation); fatalError("missing plugin accepted") } catch PluginUpdates.Failure.notPublished {}
         let badKey = Curve25519.Signing.PrivateKey().publicKey.rawRepresentation
         do { _ = try PluginUpdates.verifiedEntry(envelope, plugin: .multicam, publicKey: badKey); fatalError("signature accepted") } catch {}
         precondition(PluginUpdates.newer("2.10", than: "2.9"))

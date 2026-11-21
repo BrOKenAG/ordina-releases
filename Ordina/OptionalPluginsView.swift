@@ -55,6 +55,8 @@ private enum OptionalPluginWorker {
                     result.remoteEntry = entry
                     if status != .missing { result.status = .outdated }
                 }
+            } catch PluginUpdates.Failure.notPublished {
+                // Plugins without an online release continue using their bundled copy.
             } catch {
                 // Offline installs still use the signed app's bundled copy.
                 result.error = "无法检查在线更新"
