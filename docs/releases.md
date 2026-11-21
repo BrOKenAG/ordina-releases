@@ -43,3 +43,16 @@ python3 scripts/prepare_update.py \
 已发布安装包保持原内容；同一构建号不能用于不同安装包。修改签名清单的任何字节都需要重新签名。源代码提交、签名和 GitHub 发布是独立步骤，私钥不会随源码上传。
 
 当前构建采用临时签名、Hardened Runtime 和 App 级库验证例外，以加载 Sparkle。它未经过 Developer ID 签名与 Apple 公证，首次启动可能受到系统拦截。用户需要手动安装一次包含 Sparkle 的版本，随后可以在软件内更新。
+
+## 独立发布插件
+
+安装了支持插件更新的 ordina 后，用户在插件管理中检查并点击更新即可。维护者修改 `Integrations/OptionalPlugins` 对应脚本，递增脚本里的 `PLUGIN_VERSION`，在已同步的 `main` 分支运行：
+
+```sh
+python3 scripts/publish_plugin.py multicam
+# 或：python3 scripts/publish_plugin.py yueliu
+```
+
+脚本使用原有 Sparkle 钥匙串密钥对插件清单签名，先发布不可变插件文件，再提交并推送清单与该插件源码。需要 GitHub CLI 登录、发布权限和签名密钥。不要重用已发布的插件版本号；其他未提交改动不会被提交。发布后等待 GitHub Pages 更新。用户的旧脚本会在安装时备份；离线时仍可使用应用内置版本。
+
+如果文件已上传但清单尚未提交，可以在清单干净的情况下重跑同一命令，脚本只会复用内容完全一致的发布文件。如果提交完成但推送失败，检查 `git status` 和最近提交后执行 `git push origin main`；如果清单未提交，先检查并恢复清单再重试。

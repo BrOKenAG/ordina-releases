@@ -22,9 +22,10 @@ private struct OptionalPluginRowState: Sendable {
     var status: OptionalPluginStatus = .checking
     var error: String?
     var installing = false
+    var remoteEntry: PluginUpdates.Entry?
 
     var buttonTitle: String {
-        if error != nil { return "重试" }
+        if status == .unavailable { return "重试" }
         switch status {
         case .current: return "重新安装"
         case .outdated: return "更新"
@@ -42,19 +43,53 @@ private enum OptionalPluginWorker {
             case .missing: status = .missing
             case .outdated: status = .outdated
             }
-            return OptionalPluginRowState(status: status)
+            var result = OptionalPluginRowState(status: status)
+            do {
+                let entry = try PluginUpdates.fetch(plugin)
+                let target = try OptionalPluginInstaller.scriptDirectory().appendingPathComponent(plugin.filename)
+                let installed = (try? Data(contentsOf: target)).flatMap(PluginUpdates.version)
+                let bundled = Bundle.main.url(forResource: plugin.resourceName, withExtension: "py")
+                    .flatMap { try? Data(contentsOf: $0) }.flatMap(PluginUpdates.version)
+                let reference = [installed, bundled].compactMap { $0 }.max { PluginUpdates.newer($1, than: $0) }
+                if let reference, PluginUpdates.newer(entry.version, than: reference) {
+                    result.remoteEntry = entry
+                    if status != .missing { result.status = .outdated }
+                }
+            } catch {
+                // Offline installs still use the signed app's bundled copy.
+                result.error = "无法检查在线更新"
+            }
+            return result
         } catch {
             return OptionalPluginRowState(status: .unavailable, error: error.localizedDescription)
         }
     }
 
-    static func install(_ plugin: OptionalPlugin) -> OptionalPluginRowState {
+    static func install(_ plugin: OptionalPlugin, entry: PluginUpdates.Entry?) -> OptionalPluginRowState {
         do {
-            try OptionalPluginInstaller.install(plugin)
+            if let entry {
+                // Re-check the signed manifest before downloading, and never overwrite a newer local version.
+                let current = try PluginUpdates.fetch(plugin)
+                guard current.version == entry.version, current.sha256 == entry.sha256, current.url == entry.url else {
+                    throw PluginUpdates.Failure.invalid
+                }
+                let data = try PluginUpdates.script(current)
+                let target = try OptionalPluginInstaller.scriptDirectory().appendingPathComponent(plugin.filename)
+                if let local = (try? Data(contentsOf: target)).flatMap(PluginUpdates.version),
+                   PluginUpdates.newer(local, than: current.version) { return inspect(plugin) }
+                let temporary = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+                try FileManager.default.createDirectory(at: temporary, withIntermediateDirectories: true)
+                defer { try? FileManager.default.removeItem(at: temporary) }
+                let source = temporary.appendingPathComponent(plugin.filename)
+                try data.write(to: source, options: .atomic)
+                try OptionalPluginInstaller.install(plugin, source: source)
+            } else {
+                try OptionalPluginInstaller.install(plugin)
+            }
             return inspect(plugin)
         } catch {
-            var result = inspect(plugin)
-            result.error = "安装失败：\(error.localizedDescription)"
+            var result = OptionalPluginRowState(status: .unavailable)
+            result.error = "更新失败：\(error.localizedDescription)"
             return result
         }
     }
@@ -170,7 +205,7 @@ struct OptionalPluginsView: View {
         requests[plugin] = request
         Task { @MainActor in
             let result = await Task.detached(priority: .utility) {
-                OptionalPluginWorker.install(plugin)
+                OptionalPluginWorker.install(plugin, entry: state.remoteEntry)
             }.value
             guard requests[plugin] == request else { return }
             rows[plugin] = result
@@ -183,7 +218,7 @@ struct OptionalPluginsView: View {
         requests[plugin] = request
         if !silent { rows[plugin] = OptionalPluginRowState() }
         Task { @MainActor in
-            try? await Task.sleep(for: .seconds(5))
+            try? await Task.sleep(for: .seconds(16))
             guard requests[plugin] == request else { return }
             requests[plugin] = nil
             rows[plugin] = OptionalPluginRowState(status: .unavailable, error: "检查超时，请重试。")

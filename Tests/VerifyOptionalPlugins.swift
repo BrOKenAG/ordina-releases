@@ -121,6 +121,15 @@ struct VerifyOptionalPlugins {
             try OptionalPluginInstaller.install(plugin, home: home, source: source)
             try require(try snapshot(root) == updatedSnapshot, "重复更新不应重写文件或新增备份")
 
+            let olderBundle = Data("PLUGIN_VERSION = \"v2.1\"\n".utf8)
+            let newerInstall = Data("PLUGIN_VERSION = \"v2.2\"\n".utf8)
+            try olderBundle.write(to: source)
+            try newerInstall.write(to: target)
+            try require(try OptionalPluginInstaller.inspect(plugin, home: home, source: source) == .current, "较新插件不应显示为过期")
+            try OptionalPluginInstaller.install(plugin, home: home, source: source)
+            try require(try Data(contentsOf: target) == newerInstall, "不能将插件降级")
+            try original.write(to: source)
+
             // A failed backup must leave the customized installation intact.
             try custom.write(to: target, options: .atomic)
             try files.removeItem(at: backups)

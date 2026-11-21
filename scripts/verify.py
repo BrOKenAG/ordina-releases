@@ -16,6 +16,7 @@ checks = {
     'VerifyDestination': ['ResolveService', 'DestinationBookmark'],
     'VerifyIntegration': ['ResolveService', 'IntegrationInstaller'],
     'VerifyOptionalPlugins': ['ResolveService', 'IntegrationInstaller', 'OptionalPluginInstaller'],
+    'VerifyPluginUpdates': ['ResolveService', 'IntegrationInstaller', 'OptionalPluginInstaller', 'PluginUpdates'],
     'VerifyOnboarding': ['ResolveService', 'DestinationBookmark', 'IntegrationInstaller', 'OnboardingState'],
 }
 with tempfile.TemporaryDirectory(prefix='ordina-verification-') as temporary:

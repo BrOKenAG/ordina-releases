@@ -6,7 +6,7 @@
 
 **让项目从一开始就井然有序。**
 
-当前发布版本为 **1.9.1（29）**，Project Setup 为 **v2.3**。
+当前发布版本为 **1.9.2（30）**，Project Setup 为 **v2.3**。
 
 [下载安装包](https://github.com/BrOKenAG/ordina-releases/releases/latest) · [提交问题](https://github.com/BrOKenAG/ordina-releases/issues)
 
@@ -88,7 +88,7 @@ python3 scripts/build_app.py --output dist/ordina.app
 
 ```sh
 python3 -m pip install --target .build/dmg-libs -r requirements-build.txt
-python3 scripts/build_distribution.py --output dist --release-label build.29
+python3 scripts/build_distribution.py --output dist --release-label build.30
 ```
 
 运行验证：

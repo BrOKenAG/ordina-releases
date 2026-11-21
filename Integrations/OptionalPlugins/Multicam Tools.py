@@ -6,7 +6,8 @@ from pathlib import Path
 import sys
 
 
-PLUGIN_VERSION = "v2.0"
+PLUGIN_VERSION = "v2.1"
+ANGLE_PRESETS = ("A", "B", "C", "D", "E", "F")
 SYNC_MODES = ("波形", "时间码")
 DEFAULT_TARGET_PATH = "03_Timeline/01_合板及素材筛选"
 
@@ -277,6 +278,7 @@ class AngleApp:
         self.multicam_open = self.multicam_busy = self.multicam_done = False
         self.multicam_folder_ids = []
         self.multicam_signature = None
+        self.multicam_created, self.multicam_target = [], None
         self.window = self.build_window()
         self.timer = ui.Timer({"ID": "AngleBatchTimer", "Interval": 20, "SingleShot": False})
         self.dispatcher.On.Timeout = self.tick
@@ -315,6 +317,11 @@ class AngleApp:
                 ui.Label({"Text": "角度", "Weight": 0, "MinimumSize": [56, 30]}),
                 ui.LineEdit({"ID": "AngleEdit", "MinimumSize": [0, 30]}),
             ]),
+            ui.HGroup({"Weight": 0, "Spacing": 8}, [
+                ui.Label({"Text": "预设", "Weight": 0, "MinimumSize": [56, 30]}),
+                *[ui.Button({"ID": "Preset" + value, "Text": value, "MinimumSize": [42, 30]})
+                  for value in ANGLE_PRESETS],
+            ]),
             ui.CheckBox({"ID": "RecursiveCheck", "Text": "包含子文件夹", "Checked": True, "Weight": 0}),
             ui.HGroup({"Weight": 0, "Spacing": 8}, [
                 ui.Label({"ID": "StatusLabel", "Text": "", "WordWrap": True, "Weight": 1}),
@@ -330,6 +337,8 @@ class AngleApp:
         window.On.FolderTree.ItemClicked = self.on_selection
         window.On.FolderTree.CurrentChanged = self.on_selection
         window.On.AngleEdit.TextChanged = self.on_input_changed
+        for value in ANGLE_PRESETS:
+            getattr(window.On, "Preset" + value).Clicked = lambda ev, value=value: self.apply_preset(value)
         window.On.RecursiveCheck.Toggled = self.on_scope_changed
         window.On.RefreshBtn.Clicked = self.refresh
         window.On.ApplyBtn.Clicked = self.apply
@@ -448,6 +457,8 @@ class AngleApp:
         busy = self.job is not None
         for name in ("FolderTree", "AngleEdit", "RecursiveCheck", "RefreshBtn"):
             items[name].Enabled = not busy
+        for value in ANGLE_PRESETS:
+            items["Preset" + value].Enabled = not busy and bool(self.project and self.sources)
         items["ApplyBtn"].Text = "停止" if busy else "写入角度"
         items["ApplyBtn"].Enabled = busy or bool(self.project and self.sources and items["AngleEdit"].Text.strip())
         items["UndoBtn"].Enabled = not busy and bool(self.undo_changes) and self.undo_project_id == self.project_id
@@ -463,6 +474,12 @@ class AngleApp:
             self.status("项目已切换，请重新选择文件夹", "warning")
             return False
         return True
+
+    def apply_preset(self, value):
+        if self.job is not None or self.multicam_open:
+            return
+        self.window.GetItems()["AngleEdit"].Text = value
+        self.apply()
 
     def apply(self, ev=None):
         if self.job is not None:
@@ -589,6 +606,8 @@ class AngleApp:
                 self.build_multicam_window()
             items = self.multicam_window.GetItems()
             self.multicam_done = self.multicam_busy = False
+            self.multicam_created, self.multicam_target = [], None
+            items["LocateMulticam"].Enabled = False
             self.multicam_open = True
             self.window.Enabled = False
             self.multicam_signature = None
@@ -638,7 +657,7 @@ class AngleApp:
             ]),
             ui.Label({"ID": "MulticamStatus", "Text": "", "WordWrap": True, "Weight": 0}),
             ui.HGroup({"Weight": 0, "Spacing": 10}, [
-                self.button("CloseMulticam", "关闭"), ui.Label({"Text": "", "Weight": 1}),
+                self.button("CloseMulticam", "关闭"), self.button("LocateMulticam", "定位片段"), ui.Label({"Text": "", "Weight": 1}),
                 self.button("CreateMulticam", "创建", True),
             ]),
         ]))
@@ -646,6 +665,8 @@ class AngleApp:
             self.multicam_window.GetItems()["SyncMode"].AddItem(mode)
         self.multicam_window.On.SyncMode.CurrentIndexChanged = self.update_multicam_preview
         self.multicam_window.On.MulticamName.TextChanged = self.update_multicam_preview
+        self.multicam_window.GetItems()["LocateMulticam"].Enabled = False
+        self.multicam_window.On.LocateMulticam.Clicked = self.locate_multicam
         self.multicam_window.On.CreateMulticam.Clicked = self.run_multicam
         self.multicam_window.On.CloseMulticam.Clicked = self.close_multicam
         self.multicam_window.On.AngleMulticam.Close = self.close_multicam
@@ -709,6 +730,8 @@ class AngleApp:
             target = self.target_records[target_index]["folder"]
             result = create_multicam(self.resolve, self.project, clips, items["MulticamName"].Text, items["SyncMode"].CurrentText, target)
             self.multicam_done = True
+            self.multicam_created, self.multicam_target = result["created"], target
+            items["LocateMulticam"].Enabled = True
             summary = "已创建 %d 个多机位片段" % len(result["created"])
             self.status(summary, "success")
             items["MulticamStatus"].Text = summary + ("\n" + result["warning"] if result["warning"] else "")
@@ -724,6 +747,27 @@ class AngleApp:
             items["CreateMulticam"].Enabled = True
             items["CloseMulticam"].Enabled = True
             self.multicam_window.RecalcLayout()
+
+    def locate_multicam(self, ev=None):
+        items = self.multicam_window.GetItems()
+        try:
+            current = self.manager.GetCurrentProject()
+            if current is None or current.GetUniqueId() != self.project_id:
+                raise RuntimeError("项目已切换，请关闭窗口并刷新")
+            if not self.multicam_done or not self.multicam_created or self.multicam_target is None:
+                raise RuntimeError("没有可定位的多机位片段")
+            pool = current.GetMediaPool()
+            if not self.resolve.OpenPage("edit"):
+                raise RuntimeError("无法打开剪辑页面")
+            if not pool.SetCurrentFolder(self.multicam_target):
+                raise RuntimeError("无法打开保存位置")
+            if not pool.SetSelectedClip(self.multicam_created[0]):
+                raise RuntimeError("无法选中多机位片段")
+            self.close_multicam()
+            self.status("已选中片段，右键选择在时间线上打开", "success")
+        except Exception as exc:
+            items["MulticamStatus"].Text = str(exc)
+            items["MulticamStatus"].StyleSheet = "color: #e39791;"
 
     def close_multicam(self, ev=None):
         if self.multicam_busy:

@@ -33,11 +33,14 @@ enum OptionalPluginInstaller {
     enum Failure: LocalizedError, Sendable {
         case sourceUnavailable(String)
         case linkedPath
+        case newerInstalled
 
         var errorDescription: String? {
             switch self {
             case .sourceUnavailable(let name):
                 return "无法读取 \(name) 资源，请重新安装 ordina 后重试。"
+            case .newerInstalled:
+                return "已安装更新的插件版本。"
             case .linkedPath:
                 return "安装路径包含符号链接，请改用实际目录后重试。"
             }
@@ -64,7 +67,8 @@ enum OptionalPluginInstaller {
             if FileManager.default.fileExists(atPath: legacy.path) { return .outdated }
         }
         guard FileManager.default.fileExists(atPath: target.path) else { return .missing }
-        return try Data(contentsOf: target) == data ? .current : .outdated
+        let installed = try Data(contentsOf: target)
+        return installed == data || isNewer(installed, than: data) ? .current : .outdated
     }
 
     static func install(
@@ -83,7 +87,8 @@ enum OptionalPluginInstaller {
         }.filter { files.fileExists(atPath: $0.path) }
         let previous = files.fileExists(atPath: target.path) ? try Data(contentsOf: target) : nil
         let legacyData = try legacy.map { try Data(contentsOf: $0) }
-        if previous == data && legacy.isEmpty { return }
+        if let previous, (previous == data || isNewer(previous, than: data)) && legacy.isEmpty { return }
+        if let previous, isNewer(previous, than: data) { throw Failure.newerInstalled }
         let saved = (previous.map { $0 == data ? [] : [$0] } ?? []) + legacyData
         if !saved.isEmpty {
             let backups = try checkedPath(home: home, relative: backupsPath + "/" + plugin.id)
@@ -98,6 +103,18 @@ enum OptionalPluginInstaller {
         // Remove legacy menu entries only after preserving every old script
         // and successfully installing the replacement.
         for old in legacy { try files.removeItem(at: old) }
+    }
+
+    private static func isNewer(_ installed: Data, than source: Data) -> Bool {
+        func version(_ data: Data) -> String? {
+            guard let text = String(data: data, encoding: .utf8),
+                  let regex = try? NSRegularExpression(pattern: #"(?m)^PLUGIN_VERSION\s*=\s*["']v?([0-9]+(?:\.[0-9]+)+)["']"#),
+                  let match = regex.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)),
+                  let range = Range(match.range(at: 1), in: text) else { return nil }
+            return String(text[range])
+        }
+        guard let a = version(installed), let b = version(source) else { return false }
+        return a.compare(b, options: .numeric) == .orderedDescending
     }
 
     private static func sourceData(for plugin: OptionalPlugin, source: URL?) throws -> Data {
