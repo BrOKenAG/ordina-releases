@@ -37,7 +37,7 @@ python3 scripts/prepare_update.py \
 
 1. 将安装包上传至 `v1.9.1-build.29` 对应的 GitHub Release，核对文件大小、SHA-256 和版本说明后发布。
 2. 将新生成的 `appcast.xml` 原样提交到仓库根目录，保留 `.nojekyll`。
-3. 等待 Pages 部署完成，从线上下载清单和安装包，重新核对签名及 SHA-256。
+3. 等待 Pages 部署完成，运行 `python3 scripts/check_feeds.py --remote`。它会校验两份清单的签名，并逐个下载清单引用的资产，核对大小、SHA-256 与 Ed25519 签名；任一项不可用即以非零退出码结束。
 4. 使用独立测试副本验证检查、下载、安装、重启和设置保留，验证篡改包被拒绝。
 
 已发布安装包保持原内容；同一构建号不能用于不同安装包。修改签名清单的任何字节都需要重新签名。源代码提交、签名和 GitHub 发布是独立步骤，私钥不会随源码上传。
@@ -72,7 +72,7 @@ gh release create plugin-minutes-v0.2.0 minutes.json \
   --title 'Minutes Roughcut v0.2.0' --notes '…' --latest=false
 ```
 
-重建前先用清单里的 `sha256` 核对文件，不一致会被客户端拒绝。用 `curl -sL -o /dev/null -w '%{http_code}' <url>` 确认恢复，应为 200；GitHub 对 HEAD 请求（`curl -I`）返回 404，不能用它判断。清理旧插件版本应在新版本发布、清单改指向新 Release 之后进行。
+重建前先用清单里的 `sha256` 核对文件，不一致会被客户端拒绝。用 `curl -sL -o /dev/null -w '%{http_code}' <url>` 确认恢复，应为 200；GitHub 对 HEAD 请求（`curl -I`）返回 404，不能用它判断。清理旧插件版本应在新版本发布、清单改指向新 Release 之后进行。日常或误删后可用 `python3 scripts/check_feeds.py --remote` 一次性复核软件与插件两份清单。
 
 递增插件包版本时，同时更新 `Minutes Roughcut/plugin.json` 与 `extension/manifest.json` 中的版本号，避免 Chrome 显示的扩展版本落后于插件版本。用户在插件管理中点击「更新」即可完成替换；浏览器扩展无需重新加载，仍需在首次使用时按「一键准备浏览器扩展」的提示手动加载一次。
 
