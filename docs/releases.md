@@ -65,6 +65,15 @@ python3 scripts/publish_plugin.py minutes
 
 **插件包（bundle）**：`minutes` 包含 Resolve 脚本、本地通信组件和 Chrome 扩展文件，发布时打包为一个确定性的 JSON 容器（`minutes.json`），清单中用 `kind: "bundle"` 标记。客户端下载后校验整体 SHA-256、逐文件校验路径白名单与体积，再用**应用自带**的 `install.py` 安装——下载内容不包含可执行安装逻辑。`install.py` 属于应用本身，修改它需要发布新的 ordina 版本。安装后写入 `installed.json` 版本标记，客户端据此判断是否可更新，不会再因与内置副本字节不同而误报。
 
+**不要删除清单仍引用的插件 Release**：`plugins/manifest.json` 的 `url` 直接指向 `plugin-<name>-v<version>` 的资产。删除该 Release 后清单变成死链，已安装用户不受影响，但任何需要下载该版本的客户端都会失败。发布脚本要求版本递增，同版本无法重跑恢复，只能手工重建同名 Release 并上传**字节完全一致**的资产：
+
+```sh
+gh release create plugin-minutes-v0.2.0 minutes.json \
+  --title 'Minutes Roughcut v0.2.0' --notes '…' --latest=false
+```
+
+重建前先用清单里的 `sha256` 核对文件，不一致会被客户端拒绝。用 `curl -sL -o /dev/null -w '%{http_code}' <url>` 确认恢复，应为 200；GitHub 对 HEAD 请求（`curl -I`）返回 404，不能用它判断。清理旧插件版本应在新版本发布、清单改指向新 Release 之后进行。
+
 递增插件包版本时，同时更新 `Minutes Roughcut/plugin.json` 与 `extension/manifest.json` 中的版本号，避免 Chrome 显示的扩展版本落后于插件版本。用户在插件管理中点击「更新」即可完成替换；浏览器扩展无需重新加载，仍需在首次使用时按「一键准备浏览器扩展」的提示手动加载一次。
 
 **更新清单必须推送到仓库根目录**：客户端从 GitHub Pages 读取 `appcast.xml`，只上传 DMG 到 Release 而不提交清单，会导致用户收不到更新。发布顺序见上文「发布顺序」第 2 步。
