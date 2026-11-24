@@ -46,13 +46,27 @@ python3 scripts/prepare_update.py \
 
 ## 独立发布插件
 
-安装了支持插件更新的 ordina 后，用户在插件管理中检查并点击更新即可。维护者修改 `Integrations/OptionalPlugins` 对应脚本，递增脚本里的 `PLUGIN_VERSION`，在已同步的 `main` 分支运行：
+插件有两类，都不需要发布新的 ordina 版本：
+
+| 类型 | 插件 | 版本位置 | 发布命令 |
+| --- | --- | --- | --- |
+| 单脚本 | multicam、yueliu | 脚本内 `PLUGIN_VERSION` | `python3 scripts/publish_plugin.py multicam` |
+| 插件包 | minutes（Minutes Roughcut） | `Minutes Roughcut/plugin.json` 的 `version` | `python3 scripts/publish_plugin.py minutes` |
+
+维护者修改 `Integrations/OptionalPlugins` 下对应内容、递增版本，在已同步的 `main` 分支运行上表命令。例如：
 
 ```sh
 python3 scripts/publish_plugin.py multicam
-# 或：python3 scripts/publish_plugin.py yueliu
+python3 scripts/publish_plugin.py yueliu
+python3 scripts/publish_plugin.py minutes
 ```
 
 脚本使用原有 Sparkle 钥匙串密钥对插件清单签名，先发布不可变插件文件，再提交并推送清单与该插件源码。需要 GitHub CLI 登录、发布权限和签名密钥。不要重用已发布的插件版本号；其他未提交改动不会被提交。发布后等待 GitHub Pages 更新。用户的旧脚本会在安装时备份；离线时仍可使用应用内置版本。
+
+**插件包（bundle）**：`minutes` 包含 Resolve 脚本、本地通信组件和 Chrome 扩展文件，发布时打包为一个确定性的 JSON 容器（`minutes.json`），清单中用 `kind: "bundle"` 标记。客户端下载后校验整体 SHA-256、逐文件校验路径白名单与体积，再用**应用自带**的 `install.py` 安装——下载内容不包含可执行安装逻辑。`install.py` 属于应用本身，修改它需要发布新的 ordina 版本。安装后写入 `installed.json` 版本标记，客户端据此判断是否可更新，不会再因与内置副本字节不同而误报。
+
+递增插件包版本时，同时更新 `Minutes Roughcut/plugin.json` 与 `extension/manifest.json` 中的版本号，避免 Chrome 显示的扩展版本落后于插件版本。用户在插件管理中点击「更新」即可完成替换；浏览器扩展无需重新加载，仍需在首次使用时按「一键准备浏览器扩展」的提示手动加载一次。
+
+**更新清单必须推送到仓库根目录**：客户端从 GitHub Pages 读取 `appcast.xml`，只上传 DMG 到 Release 而不提交清单，会导致用户收不到更新。发布顺序见上文「发布顺序」第 2 步。
 
 如果文件已上传但清单尚未提交，可以在清单干净的情况下重跑同一命令，脚本只会复用内容完全一致的发布文件。如果提交完成但推送失败，检查 `git status` 和最近提交后执行 `git push origin main`；如果清单未提交，先检查并恢复清单再重试。
