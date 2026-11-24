@@ -114,6 +114,7 @@ final class WorkspaceState: ObservableObject {
 struct WorkspaceView: View {
     @State private var showingProjects = false
     @State private var settings = false
+    @State private var checkUpdatesAfterSettings = false
     @State private var search = ""
     @State private var year = "全部"
     @FocusState private var searchFocused: Bool
@@ -155,7 +156,13 @@ struct WorkspaceView: View {
             .padding(.trailing, 16).padding(.top, 8)
         }
         .animation(reduceMotion ? nil : .easeInOut(duration: 0.18), value: showingProjects)
-        .sheet(isPresented: $settings) { WorkspaceSettingsView() }
+        .sheet(isPresented: $settings, onDismiss: {
+            guard checkUpdatesAfterSettings else { return }
+            checkUpdatesAfterSettings = false
+            AppUpdater.shared.checkForUpdates()
+        }) {
+            WorkspaceSettingsView(requestUpdateCheck: { checkUpdatesAfterSettings = true })
+        }
         .onReceive(NotificationCenter.default.publisher(for: .ordinaOpenSettings)) { _ in settings = true }
         .onReceive(NotificationCenter.default.publisher(for: .ordinaFocusCreation)) { _ in showingProjects = false }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
@@ -227,6 +234,7 @@ struct WorkspaceView: View {
 }
 
 struct WorkspaceSettingsView: View {
+    var requestUpdateCheck: () -> Void = {}
     @ObservedObject private var updater = AppUpdater.shared
     @ObservedObject private var workspace = WorkspaceState.shared
     @ObservedObject private var templates = TemplateManager.shared
@@ -344,7 +352,10 @@ struct WorkspaceSettingsView: View {
                     Button(versionLabel) { versionClicks = min(10, versionClicks + 1) }
                         .buttonStyle(.plain).font(Paper.font(12)).foregroundStyle(Paper.secondary)
                     Spacer()
-                    Button("检查更新…", action: updater.checkForUpdates)
+                    Button("检查更新…") {
+                        requestUpdateCheck()
+                        dismiss()
+                    }
                         .buttonStyle(PaperQuietButton())
                         .disabled(!updater.canCheckForUpdates)
                 }.padding(.vertical, 6)

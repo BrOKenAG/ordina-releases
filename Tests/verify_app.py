@@ -11,7 +11,7 @@ localized=plistlib.loads(subprocess.check_output(['plutil','-convert','xml1','-o
 assert localized['CFBundleDisplayName']=='ordina'
 assert localized['CFBundleName']=='ordina'
 assert d['CFBundleShortVersionString']=='1.9.6'
-assert d['CFBundleVersion']=='34'
+assert d['CFBundleVersion']=='35'
 assert d['SUFeedURL']=='https://brokenag.github.io/ordina-releases/appcast.xml'
 assert d['SUPublicEDKey']=='90vua+GDSP8MSl6owCI/WSIkqBBuXO/AGw0ny4p67Bw='
 assert d['SUVerifyUpdateBeforeExtraction'] is True
