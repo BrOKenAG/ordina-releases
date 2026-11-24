@@ -153,3 +153,14 @@ python3 scripts/rollback_feeds.py --to HEAD~1 --push
 当前构建采用临时签名、Hardened Runtime 和 App 级库验证例外，以加载 Sparkle；未经过 Developer ID 签名与 Apple 公证，首次启动可能受到系统拦截。
 
 插件分发的仓库拓扑、签名信任链与新增插件流程见 [插件分发架构](plugin-distribution.md)。
+
+## 1.9.6 分阶段恢复检查
+
+恢复前先暂停其他发布。记录 `git status -sb`、`git log --oneline origin/main..HEAD`，再只读检查各仓库 `manifest.json`、`manifest-v2.json`、主仓库兼容清单与 registry 的线上内容。不要删除 Release 或覆盖存在未知差异的清单。跨仓库并非原子操作：某个插件仓库成功后，其他仓库仍可能失败。
+
+- 插件仓库中途失败：保留已发布的清单；确认每个已发布清单签名、版本、哈希与准备文件一致后，才能从同一准备结果重试。发现更高版本或同版本不同哈希则停止。
+- Git 提交成功但推送失败：比较 `origin/main..HEAD` 的提交与文件，只允许确认过的清单提交进入远端；无法确认时不要执行推送。解决后先重新读取线上状态，再重试。
+- Pages 延迟或网络中断：不要发布 appcast；等待后重新检查 registry 精确内容和完整资产验证。HTTP 错误不能当作资源不存在。
+- 需要回滚：先用 `rollback_feeds.py --to <已知良好提交> --dry-run` 核对主仓库文件；当前自动推送回滚已禁用，插件仓库需逐一审查签名、引用和实际线上状态后制定恢复操作。禁止删除仍可能被旧清单引用的 Release。
+
+真实客户端验证完成前不执行 `--publish-appcast`。软件构建须由操作者在 macOS 原生终端运行，不使用单独编译的可执行文件或旧 App 替换。
