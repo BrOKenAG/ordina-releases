@@ -1,0 +1,11 @@
+{
+  "id": "minutes",
+  "name": "Minutes Roughcut",
+  "version": "0.2.0",
+  "components": [
+    "Minutes Roughcut.py",
+    "host.py",
+    "host.command",
+    "extension/manifest.json"
+  ]
+}

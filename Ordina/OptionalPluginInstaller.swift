@@ -55,6 +55,13 @@ enum OptionalPluginInstaller {
     private static let lock = NSLock()
     private static let utilityPath = "Library/Application Support/Blackmagic Design/DaVinci Resolve/Fusion/Scripts/Utility"
     private static let backupsPath = "Library/Application Support/com.example.MagicTools.Youth/Backups"
+    private static let minutesSupportPath = "Library/Application Support/Minutes Roughcut"
+    private static let minutesBundleName = "Minutes Roughcut"
+    private static let minutesChromeManifest = "Library/Application Support/Google/Chrome/NativeMessagingHosts/com.minutesroughcut.bridge.json"
+    private static let minutesRequired = [
+        "plugin.json", "Minutes Roughcut.py", "host.py", "host.command",
+        "extension/manifest.json",
+    ]
 
     static func inspect(
         _ plugin: OptionalPlugin,
@@ -64,17 +71,22 @@ enum OptionalPluginInstaller {
         lock.lock()
         defer { lock.unlock() }
         if plugin == .minutes {
-            let base = Bundle.main.resourceURL?.appendingPathComponent("Minutes Roughcut")
-            guard let base, FileManager.default.fileExists(atPath: base.appendingPathComponent("install.py").path) else { throw Failure.sourceUnavailable(plugin.name) }
-            let pairs = [("Minutes Roughcut.py", utilityPath + "/Minutes Roughcut.py"), ("host.py", "Library/Application Support/Minutes Roughcut/host.py"), ("host.command", "Library/Application Support/Minutes Roughcut/host.command"), ("extension/manifest.json", "Library/Application Support/Minutes Roughcut/extension/manifest.json")]
-            for (resource, destination) in pairs {
+            let pairs = [
+                ("Minutes Roughcut.py", utilityPath + "/Minutes Roughcut.py"),
+                ("host.py", minutesSupportPath + "/host.py"),
+                ("host.command", minutesSupportPath + "/host.command"),
+                ("extension/manifest.json", minutesSupportPath + "/extension/manifest.json"),
+            ]
+            for (_, destination) in pairs {
                 let target = try checkedPath(home: home, relative: destination)
                 guard FileManager.default.fileExists(atPath: target.path) else { return .missing }
-                if try Data(contentsOf: target) != Data(contentsOf: base.appendingPathComponent(resource)) { return .outdated }
             }
-            let manifest = try checkedPath(home: home, relative: "Library/Application Support/Google/Chrome/NativeMessagingHosts/com.minutesroughcut.bridge.json")
+            let manifest = try checkedPath(home: home, relative: minutesChromeManifest)
             guard FileManager.default.fileExists(atPath: manifest.path) else { return .missing }
-            return .current
+            let versions = try minutesVersions(home: home)
+            guard let installed = versions.installed,
+                  let bundled = versions.bundled else { return .outdated }
+            return versionNewer(bundled, than: installed) ? .outdated : .current
         }
         let data = try sourceData(for: plugin, source: source)
         let target = try checkedPath(home: home, relative: utilityPath + "/" + plugin.filename)
@@ -95,12 +107,25 @@ enum OptionalPluginInstaller {
         lock.lock()
         defer { lock.unlock() }
         if plugin == .minutes {
-            guard let base = Bundle.main.resourceURL?.appendingPathComponent("Minutes Roughcut"), FileManager.default.fileExists(atPath: base.appendingPathComponent("install.py").path) else { throw Failure.sourceUnavailable(plugin.name) }
+            // The installer script always comes from the signed app. `source`
+            // may be an extracted, signature-verified plugin bundle.
+            guard let installer = Bundle.main.resourceURL?
+                .appendingPathComponent(minutesBundleName)
+                .appendingPathComponent("install.py"),
+                  FileManager.default.fileExists(atPath: installer.path) else {
+                throw Failure.sourceUnavailable(plugin.name)
+            }
+            let base = source ?? Bundle.main.resourceURL?.appendingPathComponent(minutesBundleName)
+            guard let base else { throw Failure.sourceUnavailable(plugin.name) }
+            for item in minutesRequired where !FileManager.default.fileExists(atPath: base.appendingPathComponent(item).path) {
+                throw Failure.sourceUnavailable(plugin.name)
+            }
             let process = Process()
             process.executableURL = URL(fileURLWithPath: "/usr/bin/python3")
-            process.arguments = [base.appendingPathComponent("install.py").path]
+            process.arguments = [installer.path]
             var environment = ProcessInfo.processInfo.environment
             environment["MINUTES_INSTALL_SOURCE"] = base.path
+            environment["HOME"] = home.path
             process.environment = environment
             let pipe = Pipe()
             process.standardOutput = pipe
@@ -108,7 +133,9 @@ enum OptionalPluginInstaller {
             try process.run()
             let output = pipe.fileHandleForReading.readDataToEndOfFile()
             process.waitUntilExit()
-            guard process.terminationStatus == 0 else { throw ResolveFailure(message: String(data: output, encoding: .utf8) ?? "安装失败") }
+            guard process.terminationStatus == 0 else {
+                throw ResolveFailure(message: String(data: output, encoding: .utf8) ?? "安装失败")
+            }
             return
         }
         // Load the full resource before creating folders or touching an install.
@@ -136,6 +163,41 @@ enum OptionalPluginInstaller {
         // Remove legacy menu entries only after preserving every old script
         // and successfully installing the replacement.
         for old in legacy { try files.removeItem(at: old) }
+    }
+
+    // Installed and bundled bundle versions. Comparing versions instead of
+    // bytes means an independently published plugin isn't reported outdated.
+    static func minutesVersions(
+        home: URL = FileManager.default.homeDirectoryForCurrentUser
+    ) throws -> (installed: String?, bundled: String?) {
+        let marker = try checkedPath(home: home, relative: minutesSupportPath + "/installed.json")
+        let installed = (try? Data(contentsOf: marker)).flatMap { bundleVersion($0, id: "minutes") }
+        var bundled: String?
+        if let url = Bundle.main.resourceURL?
+            .appendingPathComponent(minutesBundleName)
+            .appendingPathComponent("plugin.json"),
+           let data = try? Data(contentsOf: url) {
+            bundled = bundleVersion(data, id: "minutes")
+        }
+        return (installed, bundled)
+    }
+
+    static func minutesExtensionDirectory(
+        home: URL = FileManager.default.homeDirectoryForCurrentUser
+    ) throws -> URL {
+        try checkedPath(home: home, relative: minutesSupportPath + "/extension")
+    }
+
+    private static func bundleVersion(_ data: Data, id: String) -> String? {
+        guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              object["id"] as? String == id,
+              let value = object["version"] as? String,
+              value.range(of: #"^[0-9]+(\.[0-9]+){1,3}$"#, options: .regularExpression) != nil else { return nil }
+        return value
+    }
+
+    private static func versionNewer(_ candidate: String, than installed: String) -> Bool {
+        candidate.compare(installed, options: .numeric) == .orderedDescending
     }
 
     private static func isNewer(_ installed: Data, than source: Data) -> Bool {

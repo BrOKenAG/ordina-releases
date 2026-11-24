@@ -3,13 +3,23 @@ import CryptoKit
 
 // Only authenticated manifests can authorize executable plugin downloads.
 enum PluginUpdates {
-    struct Entry: Decodable {
+    struct Entry: Decodable, Equatable, Sendable {
         let version: String
         let url: String
         let sha256: String
+        let kind: String?
+
+        var isBundle: Bool { kind == "bundle" }
+        var isScript: Bool { kind == nil || kind == "script" }
     }
     private struct Payload: Decodable { let format: Int; let plugins: [String: Entry] }
     private struct Envelope: Decodable { let payload: String; let signature: String }
+    private struct Container: Decodable {
+        let format: Int
+        let id: String
+        let version: String
+        let files: [String: String]
+    }
     enum Failure: LocalizedError {
         case invalid, unavailable, notPublished
         var errorDescription: String? {
@@ -22,6 +32,11 @@ enum PluginUpdates {
     }
     static let feedURL = URL(string: "https://brokenag.github.io/ordina-releases/plugins/manifest.json")!
     static let publicKey = Data(base64Encoded: "90vua+GDSP8MSl6owCI/WSIkqBBuXO/AGw0ny4p67Bw=")!
+    static let bundleLimit = 4_000_000
+    static let bundleRequired = [
+        "plugin.json", "Minutes Roughcut.py", "host.py", "host.command",
+        "extension/manifest.json",
+    ]
 
     static func verifiedEntry(_ data: Data, plugin: OptionalPlugin, publicKey: Data = publicKey) throws -> Entry {
         let envelope = try JSONDecoder().decode(Envelope.self, from: data)
@@ -32,10 +47,16 @@ enum PluginUpdates {
         let document = try JSONDecoder().decode(Payload.self, from: payload)
         guard document.format == 1 else { throw Failure.invalid }
         guard let entry = document.plugins[plugin.id] else { throw Failure.notPublished }
+        if let kind = entry.kind, kind != "bundle", kind != "script" { throw Failure.invalid }
         guard validVersion(entry.version), entry.sha256.range(of: "^[0-9a-f]{64}$", options: .regularExpression) != nil,
               let url = URL(string: entry.url), url.scheme == "https", url.host == "github.com",
               url.user == nil, url.password == nil, url.port == nil, url.query == nil, url.fragment == nil,
               url.path.hasPrefix("/BrOKenAG/ordina-releases/releases/download/") else { throw Failure.invalid }
+        if entry.isBundle {
+            guard url.pathExtension == "json" else { throw Failure.invalid }
+        } else {
+            guard url.pathExtension == "py" else { throw Failure.invalid }
+        }
         return entry
     }
     static func validVersion(_ value: String) -> Bool {
@@ -52,11 +73,76 @@ enum PluginUpdates {
               let range = Range(match.range(at: 1), in: text) else { return nil }
         return String(text[range])
     }
+    private static func digest(_ data: Data) -> String {
+        SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+    }
     static func verifyScript(_ data: Data, entry: Entry) throws {
-        guard !data.isEmpty, data.count <= 2_000_000,
-              SHA256.hash(data: data).map({ String(format: "%02x", $0) }).joined() == entry.sha256,
+        guard entry.isScript, !data.isEmpty, data.count <= 2_000_000,
+              digest(data) == entry.sha256,
               version(data) == entry.version else { throw Failure.invalid }
     }
+
+    // A bundle is a signed JSON container. Every path is checked before any
+    // file is written, and the installer itself always comes from the app.
+    static func verifyBundle(_ data: Data, entry: Entry, plugin: OptionalPlugin) throws -> [String: Data] {
+        guard entry.isBundle, !data.isEmpty, data.count <= bundleLimit,
+              digest(data) == entry.sha256 else { throw Failure.invalid }
+        guard let container = try? JSONDecoder().decode(Container.self, from: data),
+              container.format == 1, container.id == plugin.id,
+              container.version == entry.version, validVersion(entry.version),
+              container.files.count <= 32 else { throw Failure.invalid }
+        var result: [String: Data] = [:]
+        var total = 0
+        for (name, encoded) in container.files {
+            guard validBundlePath(name), let file = Data(base64Encoded: encoded),
+                  !file.isEmpty, file.count <= 1_000_000 else { throw Failure.invalid }
+            total += file.count
+            guard total <= bundleLimit else { throw Failure.invalid }
+            result[name] = file
+        }
+        for required in bundleRequired where result[required] == nil { throw Failure.invalid }
+        guard let meta = result["plugin.json"],
+              let object = try? JSONSerialization.jsonObject(with: meta) as? [String: Any],
+              object["version"] as? String == entry.version,
+              object["id"] as? String == plugin.id else { throw Failure.invalid }
+        return result
+    }
+
+    static func validBundlePath(_ name: String) -> Bool {
+        guard !name.isEmpty, name.utf8.count <= 200, !name.hasPrefix("/"),
+              !name.contains("\\"), !name.contains(":"), !name.contains("\0") else { return false }
+        let parts = name.split(separator: "/", omittingEmptySubsequences: false)
+        guard parts.count <= 4, parts.allSatisfy({ !$0.isEmpty && !$0.hasPrefix(".") && $0 != ".." }) else { return false }
+        guard parts.allSatisfy({ $0.range(of: #"^[A-Za-z0-9 _.\-]+$"#, options: .regularExpression) != nil }) else { return false }
+        if parts.count == 1 {
+            return ["plugin.json", "Minutes Roughcut.py", "host.py", "host.command", "install.py"].contains(String(parts[0]))
+        }
+        return parts[0] == "extension"
+    }
+
+    static func bundle(_ entry: Entry, plugin: OptionalPlugin) throws -> URL {
+        guard let url = URL(string: entry.url) else { throw Failure.invalid }
+        let files = try verifyBundle(download(url, maxBytes: bundleLimit), entry: entry, plugin: plugin)
+        let manager = FileManager.default
+        let root = manager.temporaryDirectory.appendingPathComponent("ordina-bundle-" + UUID().uuidString)
+        do {
+            try manager.createDirectory(at: root, withIntermediateDirectories: true)
+            for (name, file) in files {
+                var target = root
+                for part in name.split(separator: "/") {
+                    target.appendPathComponent(String(part))
+                    if (try? manager.destinationOfSymbolicLink(atPath: target.path)) != nil { throw Failure.invalid }
+                }
+                try manager.createDirectory(at: target.deletingLastPathComponent(), withIntermediateDirectories: true)
+                try file.write(to: target, options: .atomic)
+            }
+        } catch {
+            try? manager.removeItem(at: root)
+            throw error
+        }
+        return root
+    }
+
     private final class BoundedDownload: NSObject, URLSessionDataDelegate, @unchecked Sendable {
         let limit: Int
         let done = DispatchSemaphore(value: 0)

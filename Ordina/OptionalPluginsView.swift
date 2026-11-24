@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 import UniformTypeIdentifiers
 import Darwin
 
@@ -44,14 +45,20 @@ private enum OptionalPluginWorker {
             case .outdated: status = .outdated
             }
             var result = OptionalPluginRowState(status: status)
-            if plugin == .minutes { return result }
             do {
                 let entry = try PluginUpdates.fetch(plugin)
-                let target = try OptionalPluginInstaller.scriptDirectory().appendingPathComponent(plugin.filename)
-                let installed = (try? Data(contentsOf: target)).flatMap(PluginUpdates.version)
-                let bundled = Bundle.main.url(forResource: plugin.resourceName, withExtension: "py")
-                    .flatMap { try? Data(contentsOf: $0) }.flatMap(PluginUpdates.version)
-                let reference = [installed, bundled].compactMap { $0 }.max { PluginUpdates.newer($1, than: $0) }
+                let reference: String?
+                if plugin == .minutes {
+                    let versions = try OptionalPluginInstaller.minutesVersions()
+                    reference = [versions.installed, versions.bundled].compactMap { $0 }
+                        .max { PluginUpdates.newer($1, than: $0) }
+                } else {
+                    let target = try OptionalPluginInstaller.scriptDirectory().appendingPathComponent(plugin.filename)
+                    let installed = (try? Data(contentsOf: target)).flatMap(PluginUpdates.version)
+                    let bundled = Bundle.main.url(forResource: plugin.resourceName, withExtension: "py")
+                        .flatMap { try? Data(contentsOf: $0) }.flatMap(PluginUpdates.version)
+                    reference = [installed, bundled].compactMap { $0 }.max { PluginUpdates.newer($1, than: $0) }
+                }
                 if let reference, PluginUpdates.newer(entry.version, than: reference) {
                     result.remoteEntry = entry
                     if status != .missing { result.status = .outdated }
@@ -76,16 +83,24 @@ private enum OptionalPluginWorker {
                 guard current.version == entry.version, current.sha256 == entry.sha256, current.url == entry.url else {
                     throw PluginUpdates.Failure.invalid
                 }
-                let data = try PluginUpdates.script(current)
-                let target = try OptionalPluginInstaller.scriptDirectory().appendingPathComponent(plugin.filename)
-                if let local = (try? Data(contentsOf: target)).flatMap(PluginUpdates.version),
-                   PluginUpdates.newer(local, than: current.version) { return inspect(plugin) }
-                let temporary = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-                try FileManager.default.createDirectory(at: temporary, withIntermediateDirectories: true)
-                defer { try? FileManager.default.removeItem(at: temporary) }
-                let source = temporary.appendingPathComponent(plugin.filename)
-                try data.write(to: source, options: .atomic)
-                try OptionalPluginInstaller.install(plugin, source: source)
+                if current.isBundle {
+                    let directory = try PluginUpdates.bundle(current, plugin: plugin)
+                    defer { try? FileManager.default.removeItem(at: directory) }
+                    if let installed = try? OptionalPluginInstaller.minutesVersions().installed,
+                       PluginUpdates.newer(installed, than: current.version) { return inspect(plugin) }
+                    try OptionalPluginInstaller.install(plugin, source: directory)
+                } else {
+                    let data = try PluginUpdates.script(current)
+                    let target = try OptionalPluginInstaller.scriptDirectory().appendingPathComponent(plugin.filename)
+                    if let local = (try? Data(contentsOf: target)).flatMap(PluginUpdates.version),
+                       PluginUpdates.newer(local, than: current.version) { return inspect(plugin) }
+                    let temporary = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+                    try FileManager.default.createDirectory(at: temporary, withIntermediateDirectories: true)
+                    defer { try? FileManager.default.removeItem(at: temporary) }
+                    let source = temporary.appendingPathComponent(plugin.filename)
+                    try data.write(to: source, options: .atomic)
+                    try OptionalPluginInstaller.install(plugin, source: source)
+                }
             } else {
                 try OptionalPluginInstaller.install(plugin)
             }
@@ -162,7 +177,7 @@ struct OptionalPluginsView: View {
                             }
                         }
                         if plugin == .minutes {
-                            Button("显示浏览器扩展") { showMinutesGuide() }
+                            Button("一键准备浏览器扩展") { prepareMinutesChrome() }
                         }
                         Button("重新安装") { performAction(plugin) }
                     } label: { Image(systemName: "ellipsis").frame(width: 28, height: 28) }
@@ -207,6 +222,7 @@ struct OptionalPluginsView: View {
         pending.installing = true
         pending.error = nil
         rows[plugin] = pending
+        let wasMissing = state.status == .missing
         let request = UUID()
         requests[plugin] = request
         Task { @MainActor in
@@ -215,21 +231,52 @@ struct OptionalPluginsView: View {
             }.value
             guard requests[plugin] == request else { return }
             rows[plugin] = result
-            if plugin == .minutes && result.status == .current && result.error == nil { showMinutesGuide() }
+            if plugin == .minutes && result.status == .current && result.error == nil && wasMissing {
+                prepareMinutesChrome()
+            }
         }
     }
 
-    private func showMinutesGuide() {
-        let alert = NSAlert()
-        alert.messageText = "加载 Chrome 扩展"
-        alert.informativeText = "在 Chrome 扩展程序页面开启开发者模式，选择“加载已解压的扩展程序”，然后选择打开的 extension 文件夹。"
-        alert.addButton(withTitle: "显示文件夹")
-        alert.addButton(withTitle: "稍后")
-        if alert.runModal() == .alertFirstButtonReturn {
-            let directory = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/Minutes Roughcut/extension")
-            NSWorkspace.shared.activateFileViewerSelecting([directory])
-            if let url = URL(string: "chrome://extensions") { NSWorkspace.shared.open(url) }
+    // Chrome blocks every silent install path for unpacked extensions. One tap
+    // still does everything ordina can: copy the path, open the extensions page
+    // in Chrome itself, and reveal the folder for drag-and-drop.
+    private func prepareMinutesChrome() {
+        let directory: URL
+        do {
+            directory = try OptionalPluginInstaller.minutesExtensionDirectory()
+        } catch {
+            let alert = NSAlert()
+            alert.messageText = "无法定位扩展文件夹"
+            alert.informativeText = error.localizedDescription
+            alert.addButton(withTitle: "好")
+            alert.runModal()
+            return
         }
+        guard FileManager.default.fileExists(atPath: directory.appendingPathComponent("manifest.json").path) else {
+            let alert = NSAlert()
+            alert.messageText = "请先安装 Minutes Roughcut"
+            alert.informativeText = "扩展文件尚未安装到本机，请先在插件管理中完成安装。"
+            alert.addButton(withTitle: "好")
+            alert.runModal()
+            return
+        }
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(directory.path, forType: .string)
+        NSWorkspace.shared.activateFileViewerSelecting([directory])
+        if let chrome = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.google.Chrome"),
+           let url = URL(string: "chrome://extensions") {
+            let configuration = NSWorkspace.OpenConfiguration()
+            configuration.activates = true
+            NSWorkspace.shared.open([url], withApplicationAt: chrome, configuration: configuration, completionHandler: nil)
+        } else if let url = URL(string: "chrome://extensions") {
+            NSWorkspace.shared.open(url)
+        }
+        let alert = NSAlert()
+        alert.messageText = "浏览器扩展只剩两步"
+        alert.informativeText = "扩展文件夹已在 Finder 中选中，路径也已复制。\n\n1. 在刚打开的 Chrome 扩展程序页面右上角开启「开发者模式」。\n2. 点「加载已解压的扩展程序」，按 ⌘⇧G 粘贴已复制的路径并确认。\n\n也可以直接把 Finder 中选中的 extension 文件夹拖进页面。设置一次即可，之后更新插件无需重复。"
+        alert.addButton(withTitle: "好")
+        alert.runModal()
     }
 
     private func refresh(_ plugin: OptionalPlugin, silent: Bool = false) async {

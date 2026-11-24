@@ -1,5 +1,11 @@
 #!/usr/bin/env python3
-"""Publish one signed, independently updatable Resolve plugin."""
+"""Publish one signed, independently updatable Resolve plugin.
+
+Single-file plugins are published as their .py source. Bundle plugins are
+published as a signed JSON container holding base64-encoded files. The app's
+own installer performs the installation, so a downloaded bundle never carries
+executable installer logic.
+"""
 import argparse
 import base64
 import hashlib
@@ -13,8 +19,15 @@ from sparkle_tools import ensure_tools, KEYCHAIN_ACCOUNT
 
 ROOT = Path(__file__).resolve().parents[1]
 FILES = {'multicam': 'Multicam Tools.py', 'yueliu': 'Import YueLiu.py'}
+BUNDLES = {'minutes': 'Minutes Roughcut'}
 FEED = ROOT / 'plugins/manifest.json'
 REPOSITORY = 'BrOKenAG/ordina-releases'
+VERSION_RE = re.compile(r'^[0-9]+(?:\.[0-9]+){1,3}$')
+BUNDLE_REQUIRED = {
+    'plugin.json', 'Minutes Roughcut.py', 'host.py', 'host.command',
+    'extension/manifest.json',
+}
+BUNDLE_SKIP = {'__pycache__', '.DS_Store'}
 
 
 def run(*args, capture=False):
@@ -29,15 +42,56 @@ def version(data):
     return match.group(1).decode('ascii')
 
 
+def build_bundle(directory):
+    """Return deterministic container bytes and the version from plugin.json."""
+    meta = json.loads((directory / 'plugin.json').read_text(encoding='utf-8'))
+    ver = meta.get('version')
+    if not isinstance(ver, str) or not VERSION_RE.fullmatch(ver):
+        raise ValueError('插件包版本无效。')
+    if meta.get('id') != 'minutes':
+        raise ValueError('插件包标识不符。')
+    files = {}
+    for path in sorted(directory.rglob('*')):
+        if not path.is_file() or path.suffix == '.pyc':
+            continue
+        if any(part in BUNDLE_SKIP for part in path.parts):
+            continue
+        relative = path.relative_to(directory).as_posix()
+        if relative == 'install.py':
+            # The installer ships inside the signed app, never in a download.
+            continue
+        parts = relative.split('/')
+        if (not relative or relative.startswith('/') or '..' in parts or '\0' in relative
+                or '\\' in relative or ':' in relative or len(parts) > 4
+                or any(not part or part.startswith('.') for part in parts)):
+            raise ValueError('插件包包含无效路径：' + relative)
+        files[relative] = base64.b64encode(path.read_bytes()).decode('ascii')
+    missing = BUNDLE_REQUIRED - set(files)
+    if missing:
+        raise ValueError('插件包缺少文件：' + ', '.join(sorted(missing)))
+    if len(files) > 32:
+        raise ValueError('插件包文件数量过多。')
+    document = {'format': 1, 'id': 'minutes', 'version': ver, 'files': files}
+    data = json.dumps(document, ensure_ascii=False, sort_keys=True,
+                      separators=(',', ':')).encode('utf-8')
+    if len(data) > 4_000_000:
+        raise ValueError('插件包体积过大。')
+    return data, ver
+
+
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('plugin', choices=FILES)
+    parser.add_argument('plugin', choices=sorted([*FILES, *BUNDLES]))
     args = parser.parse_args()
-    filename = FILES[args.plugin]
-    source = ROOT / 'Integrations/OptionalPlugins' / filename
-    asset_name = args.plugin + '.py'
-    data = source.read_bytes()
-    ver = version(data)
+    is_bundle = args.plugin in BUNDLES
+    display = BUNDLES[args.plugin] if is_bundle else FILES[args.plugin][:-3]
+    source = ROOT / 'Integrations/OptionalPlugins' / (BUNDLES[args.plugin] if is_bundle else FILES[args.plugin])
+    asset_name = args.plugin + ('.json' if is_bundle else '.py')
+    if is_bundle:
+        data, ver = build_bundle(source)
+    else:
+        data = source.read_bytes()
+        ver = version(data)
     tag = f'plugin-{args.plugin}-v{ver}'
     if run('git', 'branch', '--show-current', capture=True).strip() != 'main':
         raise ValueError('请在 main 分支发布。')
@@ -68,11 +122,14 @@ def main():
         previous = document['plugins'].get(args.plugin)
         if previous and tuple(map(int, ver.split('.'))) <= tuple(map(int, previous['version'].split('.'))):
             raise ValueError('插件版本必须高于已发布版本。')
-        document['plugins'][args.plugin] = {
+        entry = {
             'version': ver,
             'url': f'https://github.com/{REPOSITORY}/releases/download/{tag}/{quote(asset_name)}',
             'sha256': hashlib.sha256(data).hexdigest(),
         }
+        if is_bundle:
+            entry['kind'] = 'bundle'
+        document['plugins'][args.plugin] = entry
         payload_path.write_bytes(json.dumps(document, ensure_ascii=False, sort_keys=True, separators=(',', ':')).encode())
         signature = run(sign, '--account', KEYCHAIN_ACCOUNT, '-p', str(payload_path), capture=True).strip()
         run(sign, '--account', KEYCHAIN_ACCOUNT, '--verify', str(payload_path), signature)
@@ -90,13 +147,14 @@ def main():
                 raise ValueError('该版本已有不同的发布文件，请递增版本号。')
         else:
             run('gh', 'release', 'create', tag, str(asset), '--repo', REPOSITORY,
-                '--title', f'{filename[:-3]} v{ver}', '--notes', f'{filename[:-3]} v{ver}', '--latest=false')
+                '--title', f'{display} v{ver}', '--notes', f'{display} v{ver}', '--latest=false')
         FEED.parent.mkdir(parents=True, exist_ok=True)
         FEED.write_text(json.dumps(envelope, ensure_ascii=False, separators=(',', ':')) + '\n', encoding='utf-8')
         run('git', 'add', '--', str(source.relative_to(ROOT)), str(FEED.relative_to(ROOT)))
-        run('git', 'commit', '-m', f'Publish {args.plugin} plugin v{ver}', '--', str(source.relative_to(ROOT)), str(FEED.relative_to(ROOT)))
+        run('git', 'commit', '-m', f'Publish {args.plugin} plugin v{ver}', '--',
+            str(source.relative_to(ROOT)), str(FEED.relative_to(ROOT)))
         run('git', 'push', 'origin', 'main')
-    print(f'已发布 {filename} v{ver}。')
+    print(f'已发布 {display} v{ver}（{"插件包" if is_bundle else "单脚本"}）。')
 
 
 if __name__ == '__main__':
