@@ -88,6 +88,41 @@ def check_asset(code, downloaded, asset, signature_ok=True):
     return True
 
 
+def validate_feed_transition(current_bytes, new_bytes, verify):
+    """Reject an unsigned feed, a plugin downgrade or a same-version replacement."""
+    current, new = verify(current_bytes), verify(new_bytes)
+    if current.get('format') != 1 or new.get('format') != 1:
+        raise ValueError('插件清单格式不符，停止远端写入。')
+    old_plugins, new_plugins = current.get('plugins'), new.get('plugins')
+    if not isinstance(old_plugins, dict) or not isinstance(new_plugins, dict):
+        raise ValueError('插件清单格式不符。')
+    if set(old_plugins) - set(new_plugins):
+        raise ValueError('新清单会删除已发布插件，请先人工审查。')
+    def version(value):
+        parts = value.split('.')
+        if len(parts) < 2 or len(parts) > 4 or any(not x.isdigit() for x in parts):
+            raise ValueError('插件版本无效。')
+        return tuple(int(x) for x in (parts + ['0'] * (4 - len(parts))))
+    for name, old in old_plugins.items():
+        target = new_plugins[name]
+        ov, nv = version(old.get('version', '')), version(target.get('version', ''))
+        if nv < ov or (nv == ov and old.get('sha256') != target.get('sha256')):
+            raise ValueError('远端插件较新或同版本内容不同，停止覆盖。')
+
+
+def wait_for_registry(fetch, validate, expected, sleep, attempts=6):
+    """Require exact online registry bytes and a complete independent check."""
+    for attempt in range(attempts):
+        try:
+            if fetch() == expected and validate():
+                return
+        except (OSError, ValueError, subprocess.SubprocessError):
+            pass
+        if attempt + 1 < attempts:
+            sleep()
+    raise ValueError('线上 registry 或完整清单检查未通过；appcast 未发布。')
+
+
 def ensure_asset(plan, gateway, tmp):
     """Create the Release, or reuse an identical one on an idempotent retry."""
     if gateway.release_exists(plan.repository, plan.tag):
@@ -133,6 +168,13 @@ def execute(plan, gateway, tmp, timeout=300):
     labels = {feed.label for feed in plan.feeds}
     if {'registry', 'appcast'} <= labels:
         registry = [feed for feed in plan.feeds if feed.label == 'registry']
+        prerequisites = [feed for feed in plan.feeds if feed.label not in ('registry', 'appcast')]
+        if prerequisites:
+            step('prerequisite_gate', lambda: gateway.verify_prerequisites(prerequisites, timeout))
+            step('prerequisite_feeds', lambda: gateway.write_feeds(prerequisites))
+            local_paths = [str(feed.path.relative_to(ROOT)) for feed in prerequisites if feed.path is not None and feed.path.is_relative_to(ROOT)]
+            if local_paths:
+                step('prerequisite_push', lambda: gateway.push(replace(plan, commit_paths=local_paths)))
         appcast = [feed for feed in plan.feeds if feed.label == 'appcast']
         step('registry_write', lambda: gateway.write_feeds(registry))
         step('registry_push', lambda: gateway.push(replace(plan, commit_paths=['registry.json'])))
@@ -156,8 +198,8 @@ def describe_failure(error):
              '已完成阶段：' + (', '.join(error.completed) or '无')]
     if error.stage == 'gate':
         lines.append('签名清单未被写入；请检查 Release 资产后重跑同一命令（幂等）。')
-    elif error.stage in ('feeds', 'push', 'postflight'):
-        lines.append('资产已验证；清单可能已部分写入，用 scripts/rollback_feeds.py 检查后再重试。')
+    elif error.stage in ('prerequisite_feeds', 'prerequisite_push', 'registry_write', 'registry_push', 'registry_gate', 'client_validation', 'feeds', 'push', 'postflight'):
+        lines.append('发布非原子操作：registry、appcast 或远端清单可能已部分写入；先检查本地与线上状态，再决定恢复或重试。')
     else:
         lines.append('未产生任何清单改动；修复后重跑同一命令。')
     return '\n'.join(lines)
@@ -186,6 +228,9 @@ class Gateway:
 
     def push(self, plan):
         pass
+
+    def verify_prerequisites(self, feeds, timeout):
+        raise NotImplementedError
 
     def verify_registry_online(self, target, timeout):
         raise NotImplementedError
@@ -223,6 +268,9 @@ class DryRunGateway(Gateway):
     def push(self, plan):
         self.calls.append('push')
 
+    def verify_prerequisites(self, feeds, timeout):
+        self.calls.append('prerequisite_gate')
+
     def verify_registry_online(self, target, timeout):
         self.calls.append('registry_gate')
 
@@ -255,9 +303,13 @@ class LocalGateway(Gateway):
             raise ValueError('找不到签名工具。')
 
     def release_exists(self, repository, tag):
-        return subprocess.run(['gh', 'release', 'view', tag, '--repo', repository],
-                              cwd=ROOT, stdout=subprocess.DEVNULL,
-                              stderr=subprocess.DEVNULL).returncode == 0
+        result = subprocess.run(['gh', 'release', 'view', tag, '--repo', repository],
+                                cwd=ROOT, capture_output=True, text=True)
+        if result.returncode == 0:
+            return True
+        if 'release not found' in result.stderr.lower() or 'http 404' in result.stderr.lower():
+            return False
+        raise ValueError('无法确认 Release 是否存在，请检查网络与授权后重试。')
 
     def create_release(self, repository, tag, asset_path, title, notes, latest=False):
         command = ['gh', 'release', 'create', tag, str(asset_path),
@@ -296,7 +348,15 @@ class LocalGateway(Gateway):
             'content': base64.b64encode(content).decode('ascii'),
         }
         if existing.returncode == 0:
-            body['sha'] = json.loads(existing.stdout)['sha']
+            current = json.loads(existing.stdout)
+            # A successful earlier attempt is reused; never overwrite a newer
+            # remote feed blindly after an interrupted multi-repository push.
+            current_bytes = base64.b64decode(current.get('content', ''), validate=False)
+            if current_bytes == content:
+                return
+            from feed_signing import verify_envelope
+            validate_feed_transition(current_bytes, content, verify_envelope)
+            body['sha'] = current['sha']
         elif 'HTTP 404' not in existing.stderr:
             raise ValueError(f'{repository}/{remote_path} 读取失败，停止写入。')
         result = subprocess.run(
@@ -316,19 +376,39 @@ class LocalGateway(Gateway):
         subprocess.run(['git', 'commit', '-m', plan.commit_message], cwd=ROOT, check=True)
         subprocess.run(['git', 'push', 'origin', 'main'], cwd=ROOT, check=True)
 
+    def verify_prerequisites(self, feeds, timeout):
+        import tempfile
+        from feed_signing import verify_envelope
+        from check_feeds import entry_url_error
+        with tempfile.TemporaryDirectory(prefix='ordina-prerequisite-') as directory:
+            for feed in feeds:
+                doc = verify_envelope(feed.content)
+                if doc.get('format') != 1 or not isinstance(doc.get('plugins'), dict):
+                    raise ValueError('插件清单格式无效。')
+                for name, entry in doc['plugins'].items():
+                    if feed.label == 'legacy' or feed.label.startswith('compat-plugin:'):
+                        prefix = '/BrOKenAG/ordina-releases/releases/download/'
+                    else:
+                        prefix = '/BrOKenAG/ordina-plugin-' + name + '/releases/download/'
+                    problem = entry_url_error(entry, prefix)
+                    if problem:
+                        raise ValueError(f'{name}: {problem}')
+                    target = Path(directory) / 'asset'
+                    target.unlink(missing_ok=True)
+                    code = self.http_get(entry['url'], target, timeout)
+                    if code != '200' or not target.is_file() or hashlib.sha256(target.read_bytes()).hexdigest() != entry['sha256']:
+                        raise ValueError(f'{name} 资源不可用或哈希不符，停止发布清单。')
+
     def verify_registry_online(self, target, timeout):
         import tempfile, time
         with tempfile.TemporaryDirectory(prefix='ordina-registry-gate-') as directory:
             dest = Path(directory) / 'registry.json'
-            for attempt in range(6):
+            def fetch():
                 code = self.http_get('https://brokenag.github.io/ordina-releases/registry.json?gate=' + str(time.time_ns()), dest, timeout)
-                if code == '200' and dest.is_file() and dest.read_bytes() == target.content:
-                    result = subprocess.run(['python3', 'scripts/check_feeds.py', '--remote', '--latest'], cwd=ROOT)
-                    if result.returncode == 0:
-                        return
-                if attempt < 5:
-                    time.sleep(10)
-            raise ValueError('线上 registry 或完整清单检查未通过；appcast 未发布。')
+                return dest.read_bytes() if code == '200' and dest.is_file() else None
+            def validate():
+                return subprocess.run(['python3', 'scripts/check_feeds.py', '--remote', '--latest'], cwd=ROOT).returncode == 0
+            wait_for_registry(fetch, validate, target.content, lambda: time.sleep(10))
 
     def verify_client_validation(self, plan):
         if not plan.validation_report or not plan.validation_report.is_file():

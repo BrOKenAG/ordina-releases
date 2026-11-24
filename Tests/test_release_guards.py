@@ -11,6 +11,12 @@ class ReleaseGuardTests(unittest.TestCase):
         self.assertIn('暂', result.stderr)
     def test_rollback_cannot_push(self): self.check_blocked('rollback_feeds.py', '--push')
     def test_plugin_publish_cannot_push(self): self.check_blocked('publish_plugin.py', 'minutes')
+    def test_rollback_dry_run_does_not_change_feeds(self):
+        paths = [ROOT / 'appcast.xml', ROOT / 'plugins/manifest.json', ROOT / 'registry.json']
+        before = [p.read_bytes() if p.is_file() else None for p in paths]
+        result = subprocess.run([sys.executable, str(ROOT/'scripts/rollback_feeds.py'), '--to', 'HEAD~1', '--dry-run'], cwd=ROOT, capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(before, [p.read_bytes() if p.is_file() else None for p in paths])
     def test_feeds_cannot_push(self):
         result = subprocess.run([sys.executable, str(ROOT/'scripts/build_feeds.py'), '--push'], cwd=ROOT, capture_output=True, text=True)
         self.assertNotEqual(result.returncode, 0)

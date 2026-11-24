@@ -2,6 +2,7 @@
 import copy
 import sys
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -56,6 +57,16 @@ class FeedDerivationTests(unittest.TestCase):
             'https://github.com/' + self.plugins['minutes']['repository']))
         self.assertFalse(result['url'].startswith(
             'https://github.com/BrOKenAG/ordina-releases/releases/'))
+
+    def test_195_and_196_receive_different_feed_paths_and_urls(self):
+        with patch.object(bf, 'envelope_bytes', return_value=b'signed'):
+            generated = bf.generate(self.plugins)
+        for name in ('minutes', 'multicam'):
+            legacy = generated['compat-plugin:' + name][0]['plugins'][name]
+            current = generated['plugin:' + name][0]['plugins'][name]
+            self.assertIn('/ordina-releases/releases/download/', legacy['url'])
+            self.assertIn('/ordina-plugin-' + name + '/releases/download/', current['url'])
+            self.assertTrue(self.plugins[name]['feed'].endswith('/manifest-v2.json'))
 
     def test_source_comment_is_never_published(self):
         raw = (ROOT / 'plugins' / 'registry.source.json').read_text(encoding='utf-8')

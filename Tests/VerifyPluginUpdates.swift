@@ -45,7 +45,7 @@ import CryptoKit
         func descriptor(_ name: String, kind: String = "script") -> [String: String] {
             [
                 "repository": "BrOKenAG/ordina-plugin-\(name)",
-                "feed": "https://brokenag.github.io/ordina-plugin-\(name)/manifest.json",
+                "feed": "https://brokenag.github.io/ordina-plugin-\(name)/manifest-v2.json",
                 "downloadPrefix": "/BrOKenAG/ordina-plugin-\(name)/releases/download/",
                 "kind": kind,
             ]
@@ -152,7 +152,7 @@ import CryptoKit
         let entries = try PluginUpdates.verifiedRegistry(validRegistry, publicKey: publicKey)
         precondition(entries.count == 2)
         precondition(entries["minutes"]?.downloadPrefix == minutesPrefix)
-        precondition(entries["multicam"]?.feed == "https://brokenag.github.io/ordina-plugin-multicam/manifest.json")
+        precondition(entries["multicam"]?.feed == "https://brokenag.github.io/ordina-plugin-multicam/manifest-v2.json")
         expectFailure("registry wrong key") {
             _ = try PluginUpdates.verifiedRegistry(validRegistry,
                                                    publicKey: Curve25519.Signing.PrivateKey().publicKey.rawRepresentation)
@@ -183,6 +183,18 @@ import CryptoKit
             _ = try PluginUpdates.verifiedRegistry(try registry(["../evil": descriptor("minutes")]), publicKey: publicKey)
         }
 
+        let (offlineCache, refreshed) = try PluginUpdates.resolveRegistry(cached: entries,
+            downloadData: { throw PluginUpdates.Failure.unavailable }, verifyData: { _ in fatalError("must not verify") })
+        precondition(!refreshed && offlineCache.count == entries.count)
+        expectFailure("offline without cache") {
+            _ = try PluginUpdates.resolveRegistry(cached: nil,
+                downloadData: { throw PluginUpdates.Failure.unavailable }, verifyData: { _ in entries })
+        }
+        expectFailure("bad signature never uses cache") {
+            _ = try PluginUpdates.resolveRegistry(cached: entries,
+                downloadData: { tampered }, verifyData: { try PluginUpdates.verifiedRegistry($0, publicKey: publicKey) })
+        }
+        precondition(entries["unknown"] == nil)
         print("Plugin registry, signature, digest, versions and bundle verification passed")
     }
 }

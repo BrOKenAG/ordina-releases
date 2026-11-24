@@ -216,3 +216,67 @@ class AppReleaseStagesTests(unittest.TestCase):
             rt.execute(self.plan(True), gateway, Path(tmp))
         self.assertLess(gateway.calls.index('registry_gate'), gateway.calls.index('client_validation'))
         self.assertLess(gateway.calls.index('client_validation'), gateway.calls.index('write:appcast'))
+
+class PartialPublicationTests(unittest.TestCase):
+    def test_remote_feed_partial_failure_never_pushes_main_repo(self):
+        class Partial(RecordingGateway):
+            def write_feeds(self, feeds):
+                self.calls.append('plugin-one-written')
+                raise ConnectionError('network interrupted before plugin two')
+        plan = make_plan()
+        plan.feeds = [rt.FeedTarget('plugin:first', b'one', repository='example/one'),
+                      rt.FeedTarget('plugin:second', b'two', repository='example/two')]
+        gateway = Partial()
+        with tempfile.TemporaryDirectory() as tmp:
+            with self.assertRaises(rt.ReleaseError) as error:
+                rt.execute(plan, gateway, Path(tmp))
+        self.assertEqual(error.exception.stage, 'feeds')
+        self.assertIn('plugin-one-written', gateway.calls)
+        self.assertNotIn('push', gateway.calls)
+        self.assertIn('部分写入', rt.describe_failure(error.exception))
+
+    def test_interrupted_registry_publish_never_writes_appcast(self):
+        class Offline(RecordingGateway):
+            def write_feeds(self, feeds): self.calls.append('write:' + feeds[0].label)
+            def push(self, plan): raise ConnectionError('network interrupted')
+        plan = make_plan()
+        plan.feeds = [rt.FeedTarget('appcast', b'new'), rt.FeedTarget('registry', b'new')]
+        gateway = Offline()
+        with tempfile.TemporaryDirectory() as tmp:
+            with self.assertRaises(rt.ReleaseError): rt.execute(plan, gateway, Path(tmp))
+        self.assertNotIn('write:appcast', gateway.calls)
+
+class RegistryPropagationTests(unittest.TestCase):
+    def test_pages_delay_then_success(self):
+        responses = iter([None, b'old', b'new'])
+        sleeps = []
+        rt.wait_for_registry(lambda: next(responses), lambda: True, b'new', lambda: sleeps.append(1))
+        self.assertEqual(len(sleeps), 2)
+
+    def test_network_and_failed_validation_stop(self):
+        responses = iter([OSError('offline'), b'new', b'new'])
+        def fetch():
+            value = next(responses)
+            if isinstance(value, Exception): raise value
+            return value
+        with self.assertRaises(ValueError):
+            rt.wait_for_registry(fetch, lambda: False, b'new', lambda: None, attempts=3)
+
+class FeedTransitionTests(unittest.TestCase):
+    @staticmethod
+    def doc(version, digest='a'):
+        import json
+        return json.dumps({'format': 1, 'plugins': {'p': {'version': version, 'sha256': digest}}}).encode()
+    @staticmethod
+    def decode(data):
+        import json
+        return json.loads(data)
+    def test_retry_and_url_migration_keep_same_digest(self):
+        data = self.doc('2.1')
+        rt.validate_feed_transition(data, data, self.decode)
+    def test_downgrade_and_same_version_change_are_rejected(self):
+        for old, new in ((self.doc('2.2'), self.doc('2.1')), (self.doc('2.1','a'), self.doc('2.1','b'))):
+            with self.assertRaises(ValueError): rt.validate_feed_transition(old, new, self.decode)
+    def test_signature_error_stops_before_write(self):
+        def bad(_): raise ValueError('bad signature')
+        with self.assertRaises(ValueError): rt.validate_feed_transition(b'bad', self.doc('2.1'), bad)

@@ -68,7 +68,7 @@ enum PluginUpdates {
               url.host == "brokenag.github.io", url.user == nil, url.password == nil,
               url.port == nil, url.query == nil, url.fragment == nil,
               url.path.hasPrefix("/ordina-plugin-"),
-              url.path.hasSuffix("/manifest.json") else { return false }
+              (url.path.hasSuffix("/manifest.json") || url.path.hasSuffix("/manifest-v2.json")) else { return false }
         return true
     }
 
@@ -104,16 +104,25 @@ enum PluginUpdates {
         defer { registryLock.unlock() }
         if !forceRefresh, let cache = registryCache,
            Date().timeIntervalSince(cache.fetched) < 300 { return cache.entries }
+        let (entries, refreshed) = try resolveRegistry(cached: registryCache?.entries,
+            downloadData: { try download(registryURL, maxBytes: 100_000) },
+            verifyData: { try verifiedRegistry($0) })
+        if refreshed { registryCache = (Date(), entries) }
+        return entries
+    }
+
+    // Signature errors must never select a stale cache. Network failures may
+    // use an already verified cache; callers can still install bundled files.
+    static func resolveRegistry(cached: [String: RegistryEntry]?,
+                                downloadData: () throws -> Data,
+                                verifyData: (Data) throws -> [String: RegistryEntry]) throws -> ([String: RegistryEntry], Bool) {
         let data: Data
-        do {
-            data = try download(registryURL, maxBytes: 100_000)
-        } catch {
-            if let cache = registryCache { return cache.entries }
+        do { data = try downloadData() }
+        catch {
+            if let cached { return (cached, false) }
             throw Failure.unavailable
         }
-        let entries = try verifiedRegistry(data)
-        registryCache = (Date(), entries)
-        return entries
+        return (try verifyData(data), true)
     }
 
     static func verifiedEntry(_ data: Data, plugin: OptionalPlugin,

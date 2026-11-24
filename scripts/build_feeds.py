@@ -96,6 +96,9 @@ def generate(plugins, tool=None):
     }
     for name, document in per_plugin.items():
         outputs['plugin:' + name] = (document, envelope_bytes(document, tool))
+        if name in legacy['plugins']:
+            compatibility = {'format': 1, 'plugins': {name: legacy['plugins'][name]}}
+            outputs['compat-plugin:' + name] = (compatibility, envelope_bytes(compatibility, tool))
     return outputs
 
 
@@ -105,7 +108,8 @@ def resolve_paths(args, generated):
         name, separator, value = item.partition('=')
         if not separator or not name or not value:
             raise ValueError('--repo-path 需要 NAME=PATH 格式：' + item)
-        paths['plugin:' + name] = Path(value).expanduser().resolve() / 'manifest.json'
+        paths['plugin:' + name] = Path(value).expanduser().resolve() / 'manifest-v2.json'
+        paths['compat-plugin:' + name] = Path(value).expanduser().resolve() / 'manifest.json'
     missing = [key for key in generated if key not in paths]
     if missing:
         raise ValueError('缺少本地插件仓库路径（--repo-path）：' + ', '.join(missing))

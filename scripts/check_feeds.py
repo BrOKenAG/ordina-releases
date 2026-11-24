@@ -78,7 +78,7 @@ def valid_feed(value):
                 and u.port is None and not u.username and not u.password
                 and not u.query and not u.fragment
                 and u.path.startswith('/ordina-plugin-')
-                and u.path.endswith('/manifest.json'))
+                and (u.path.endswith('/manifest.json') or u.path.endswith('/manifest-v2.json')))
     except ValueError:
         return False
 
@@ -146,7 +146,7 @@ def check_registry(label, raw, tool, tmp, index):
     return rows, descriptors
 
 
-def check_plugins(label, raw, descriptors, tool, tmp, timeout, download_assets):
+def check_plugins(label, raw, descriptors, tool, tmp, timeout, download_assets, legacy=False):
     rows, document = check_envelope(label, raw, tool, tmp, label)
     if document is None:
         return rows
@@ -158,7 +158,7 @@ def check_plugins(label, raw, descriptors, tool, tmp, timeout, download_assets):
         if descriptor is None:
             rows.append((f'插件 {name}', 'FAIL', 'registry 中未登记'))
             continue
-        prefix = '/BrOKenAG/ordina-releases/releases/download/' if label == '兼容清单' else descriptor['downloadPrefix']
+        prefix = '/BrOKenAG/ordina-releases/releases/download/' if label == '兼容清单' or legacy else descriptor['downloadPrefix']
         problem = entry_url_error(entry, prefix)
         if problem:
             rows.append((f'插件 {name} v{entry.get("version", "?")}', 'FAIL', problem))
@@ -280,7 +280,7 @@ def main():
                 for item in args.repo_path:
                     key, _, value = item.partition('=')
                     if key == name:
-                        path = Path(value).expanduser().resolve() / 'manifest.json'
+                        path = Path(value).expanduser().resolve() / urlparse(descriptor['feed']).path.rsplit('/', 1)[-1]
                 if path is None or not path.is_file():
                     if args.preflight:
                         continue  # optional in preflight; --remote always covers it
@@ -288,6 +288,18 @@ def main():
                     continue
                 raw = path.read_bytes()
             rows += check_plugins(name, raw, descriptors, tool, tmp, args.timeout, download_assets)
+            # 1.9.5 reads the original per-plugin manifest path and uses the
+            # old main-repository allowlist; it does not consume registry v2.
+            if args.remote:
+                old_url = descriptor['feed'].rsplit('/', 1)[0] + '/manifest.json'
+                old_path = tmp / f'{name}-legacy-manifest.json'
+                code = curl(old_url + f'?t={stamp}', old_path, args.timeout)
+                if code != '200':
+                    rows.append((f'{name} 旧版清单', 'FAIL', f'HTTP {code}'))
+                else:
+                    rows += check_plugins(name + '-旧版', old_path.read_bytes(), descriptors, tool, tmp,
+                                          args.timeout, download_assets, legacy=True)
+
 
     width = max(len(row[0]) for row in rows)
     failures = sum(1 for row in rows if row[1] == 'FAIL')

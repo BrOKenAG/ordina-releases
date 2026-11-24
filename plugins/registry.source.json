@@ -4,7 +4,7 @@
   "plugins": {
     "minutes": {
       "repository": "BrOKenAG/ordina-plugin-minutes",
-      "feed": "https://brokenag.github.io/ordina-plugin-minutes/manifest.json",
+      "feed": "https://brokenag.github.io/ordina-plugin-minutes/manifest-v2.json",
       "downloadPrefix": "/BrOKenAG/ordina-plugin-minutes/releases/download/",
       "kind": "bundle",
       "asset": "minutes.json",
@@ -21,7 +21,7 @@
     },
     "multicam": {
       "repository": "BrOKenAG/ordina-plugin-multicam",
-      "feed": "https://brokenag.github.io/ordina-plugin-multicam/manifest.json",
+      "feed": "https://brokenag.github.io/ordina-plugin-multicam/manifest-v2.json",
       "downloadPrefix": "/BrOKenAG/ordina-plugin-multicam/releases/download/",
       "kind": "script",
       "asset": "Multicam.Tools.py",
@@ -38,7 +38,7 @@
     },
     "yueliu": {
       "repository": "BrOKenAG/ordina-plugin-yueliu",
-      "feed": "https://brokenag.github.io/ordina-plugin-yueliu/manifest.json",
+      "feed": "https://brokenag.github.io/ordina-plugin-yueliu/manifest-v2.json",
       "downloadPrefix": "/BrOKenAG/ordina-plugin-yueliu/releases/download/",
       "kind": "script",
       "asset": "Import.YueLiu.py",

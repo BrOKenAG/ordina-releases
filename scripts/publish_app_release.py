@@ -69,7 +69,16 @@ def main():
         # The app release must publish the signed registry in the same
         # transaction: newer clients bootstrap plugin feeds from it, so a
         # client update without registry.json would break plugin checking.
-        registry_bytes = generate(load_source())['registry'][1]
+        source = load_source()
+        generated = generate(source)
+        registry_bytes = generated['registry'][1]
+        prerequisites = [FeedTarget('legacy', generated['legacy'][1], path=ROOT / 'plugins/manifest.json')]
+        for name, meta in sorted(source.items()):
+            if not meta.get('published'):
+                continue
+            for label, remote in (('compat-plugin:' + name, 'manifest.json'), ('plugin:' + name, 'manifest-v2.json')):
+                if label in generated:
+                    prerequisites.append(FeedTarget(label, generated[label][1], repository=meta['repository'], remote_path=remote))
 
         plan = Plan(
             label=f'ordina {version}（{build}）',
@@ -83,7 +92,7 @@ def main():
             publish_appcast=args.publish_appcast,
             validation_report=args.validation_report,
             feeds=[FeedTarget('appcast', feed_bytes, path=ROOT / 'appcast.xml'),
-                   FeedTarget('registry', registry_bytes, path=ROOT / 'registry.json')],
+                   FeedTarget('registry', registry_bytes, path=ROOT / 'registry.json')] + prerequisites,
             commit_paths=['appcast.xml', 'registry.json'],
             commit_message=f'Publish signed ordina {version} update feed',
         )
