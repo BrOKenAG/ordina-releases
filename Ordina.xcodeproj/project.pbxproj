@@ -277,7 +277,7 @@
 				CODE_SIGN_ENTITLEMENTS = "Ordina/Ordina.entitlements";
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 33;
+				CURRENT_PROJECT_VERSION = 34;
 				DEVELOPMENT_TEAM = G7MV82YF2U;
 				ENABLE_APP_SANDBOX = NO;
 				ENABLE_HARDENED_RUNTIME = YES;
@@ -304,7 +304,7 @@
 					"@executable_path/../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 26.0;
-				MARKETING_VERSION = 1.9.5;
+				MARKETING_VERSION = 1.9.6;
 				PRODUCT_BUNDLE_IDENTIFIER = "com.example.MagicTools.Youth";
 				PRODUCT_NAME = "ordina";
 				REGISTER_APP_GROUPS = YES;
@@ -326,7 +326,7 @@
 				CODE_SIGN_ENTITLEMENTS = "Ordina/Ordina.entitlements";
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 33;
+				CURRENT_PROJECT_VERSION = 34;
 				DEVELOPMENT_TEAM = G7MV82YF2U;
 				ENABLE_APP_SANDBOX = NO;
 				ENABLE_HARDENED_RUNTIME = YES;
@@ -353,7 +353,7 @@
 					"@executable_path/../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 26.0;
-				MARKETING_VERSION = 1.9.5;
+				MARKETING_VERSION = 1.9.6;
 				PRODUCT_BUNDLE_IDENTIFIER = "com.example.MagicTools.Youth";
 				PRODUCT_NAME = "ordina";
 				REGISTER_APP_GROUPS = YES;

@@ -1,0 +1,49 @@
+{
+  "format": 2,
+  "_comment": "唯一插件元数据源。所有签名清单由 scripts/build_feeds.py 从本文件派生，禁止手工编辑 registry.json / plugins/manifest.json / 各插件仓库 manifest.json。",
+  "plugins": {
+    "minutes": {
+      "repository": "BrOKenAG/ordina-plugin-minutes",
+      "feed": "https://brokenag.github.io/ordina-plugin-minutes/manifest.json",
+      "downloadPrefix": "/BrOKenAG/ordina-plugin-minutes/releases/download/",
+      "kind": "bundle",
+      "asset": "minutes.json",
+      "source": "Minutes Roughcut",
+      "published": true,
+      "version": "0.2.0",
+      "sha256": "8ee9e102a4e80ad8063596748d0d037edcf711da6cc182917c6ad52abcf8010c",
+      "size": 60688,
+      "legacy": {
+        "version": "0.2.0",
+        "sha256": "8ee9e102a4e80ad8063596748d0d037edcf711da6cc182917c6ad52abcf8010c",
+        "asset": "minutes.json"
+      }
+    },
+    "multicam": {
+      "repository": "BrOKenAG/ordina-plugin-multicam",
+      "feed": "https://brokenag.github.io/ordina-plugin-multicam/manifest.json",
+      "downloadPrefix": "/BrOKenAG/ordina-plugin-multicam/releases/download/",
+      "kind": "script",
+      "asset": "Multicam.Tools.py",
+      "source": "Multicam Tools.py",
+      "published": true,
+      "version": "2.1",
+      "sha256": "145c1af43e950220bb839f2e187c12abe8382c5673d745659d794535675883b0",
+      "size": 37757,
+      "legacy": {
+        "version": "2.1",
+        "sha256": "145c1af43e950220bb839f2e187c12abe8382c5673d745659d794535675883b0",
+        "asset": "Multicam.Tools.py"
+      }
+    },
+    "yueliu": {
+      "repository": "BrOKenAG/ordina-plugin-yueliu",
+      "feed": "https://brokenag.github.io/ordina-plugin-yueliu/manifest.json",
+      "downloadPrefix": "/BrOKenAG/ordina-plugin-yueliu/releases/download/",
+      "kind": "script",
+      "asset": "Import.YueLiu.py",
+      "source": "Import YueLiu.py",
+      "published": false
+    }
+  }
+}

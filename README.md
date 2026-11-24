@@ -96,6 +96,8 @@ python3 scripts/build_app.py --output dist/ordina.app
 
 也可以用 Xcode 打开 `Ordina.xcodeproj`，选择共享 Scheme `Ordina`。构建脚本默认输出到桌面；指定 `--output` 可以改变位置。
 
+构建脚本使用标准 `xcodebuild`，需在**本地非沙盒终端**（如「终端」App）或 Xcode 内运行。SwiftPM 解析依赖时会调用 `sandbox-exec`，在受沙盒限制的自动化环境中会被系统拒绝（报 `sandbox_apply: Operation not permitted`）。这属于运行环境的权限限制，不是工程配置问题；可先用 `/usr/bin/sandbox-exec -p '(version 1)(allow default)' /bin/echo OK` 检查该终端是否可用。
+
 生成 DMG 还需要 Python 3.10 或更新版本及打包依赖：
 
 ```sh
@@ -128,4 +130,4 @@ docs/                  发布流程、数据兼容与使用说明
 appcast.xml            已发布版本的签名更新清单
 ```
 
-发布更新的方法见 [发布说明](docs/releases.md)。早期标识、数据文件和脚本兼容关系见 [数据兼容说明](docs/compatibility.md)。使用与数据处理说明见 [使用说明](docs/usage-notice.md)，第三方授权见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
+发布更新与标准流程见 [发布说明](docs/releases.md)，插件仓库拓扑与签名注册表见 [插件分发架构](docs/plugin-distribution.md)。早期标识、数据文件和脚本兼容关系见 [数据兼容说明](docs/compatibility.md)。使用与数据处理说明见 [使用说明](docs/usage-notice.md)，第三方授权见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。

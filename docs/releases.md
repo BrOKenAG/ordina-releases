@@ -1,93 +1,153 @@
-# 构建与发布更新
+# 构建与发布
 
-源码、安装包和更新清单共用 `BrOKenAG/ordina-releases` 仓库。GitHub Pages 从 `main` 分支根目录读取 `appcast.xml`，下载文件位于 GitHub Releases。
+> **1.9.6 发布准备中：跨仓库插件推送和回滚推送已暂时停用。以下旧命令不应执行；先完成故障恢复验证。软件 appcast 须在真实客户端验证后单独发布。**
+
+源码、安装包和更新清单共用 `BrOKenAG/ordina-releases` 仓库。GitHub Pages 从 `main` 分支根目录读取 `appcast.xml` 与 `registry.json`，下载文件位于 GitHub Releases。
+
+## 构建环境：标准 Xcode 流程
+
+`scripts/build_app.py` 使用标准 `xcodebuild`，**不含任何环境专用编译参数或临时替代方案**。它必须在**本地非沙盒终端**（如「终端」App）或 Xcode 图形界面内运行。
+
+原因是 SwiftPM 的 `Resolve Package Graph` 阶段会调用 `sandbox-exec`，而该调用在受沙盒限制的自动化环境中被系统拒绝：
+
+```
+xcodebuild: error: Could not resolve package dependencies:
+  sandbox-exec: sandbox_apply: Operation not permitted
+```
+
+这与工程配置无关：Swift 编译器本身可用（`xcrun swiftc` 正常），绕过工具层沙盒后该错误仍然存在。用下面的命令检查一个终端是否具备构建条件：
+
+```sh
+/usr/bin/sandbox-exec -p '(version 1)(allow default)' /bin/echo OK
+```
+
+若返回 `OK`，在该终端运行 `build_app.py`；若返回 `Operation not permitted`，改用 Xcode 打开工程按 ⌘B，或换一台标准 macOS 构建机。**不要**把 `swiftc` 手动编译、复用旧 `.app` Bundle 之类的临时手段写进仓库或当作正式流程——那些只是特定受限环境下的应急产物，无法保证资源与签名完整。
+
+私钥保存在本机钥匙串账号 `ordina-sparkle` 下，不进入仓库，也不需要 CI Secrets。
 
 ## 准备
 
 1. 在 Xcode 的 Debug、Release 配置中递增 `CURRENT_PROJECT_VERSION`，并设置 `MARKETING_VERSION`。
-2. 同步 `Tests/verify_app.py` 与 README 中的当前版本。
-3. 运行源码测试、构建 App、验证签名，再生成 DMG。
-
-以 1.9.1、构建号 29 为例：
+2. 同步 `Tests/verify_app.py` 中的版本断言。
+3. 运行源码测试、构建 App、验证签名，再生成 DMG：
 
 ```sh
 python3 scripts/verify.py
+python3 scripts/build_app.py --output dist/ordina.app
+python3 Tests/verify_app.py dist/ordina.app
 python3 -m pip install --target .build/dmg-libs -r requirements-build.txt
-python3 scripts/build_distribution.py --output dist/build.29 --release-label build.29
+python3 scripts/build_distribution.py --app dist/ordina.app --output dist --release-label build.34
 ```
 
-## 签名
+DMG 打包依赖 Pillow 的编译扩展，需用与安装依赖时相同的 Python 解释器运行（例如 `/usr/local/bin/python3`）。
 
-当前正式更新公钥位于 `config/Info.plist`，对应私钥保存在本机钥匙串账号 `ordina-sparkle` 下。私钥不在仓库中。源码使用者发布自己的分支时，需要生成自己的密钥并配置自己的更新地址，不能向官方更新地址发布未经授权的内容。
+## 生成签名更新清单
 
 官方发布者获取上一版已签名清单后生成下一版清单：
 
 ```sh
 curl --fail --location https://brokenag.github.io/ordina-releases/appcast.xml --output dist/previous-appcast.xml
 python3 scripts/prepare_update.py \
-  --app dist/build.29/ordina.app \
-  --archive dist/build.29/ordina-1.9.1-build.29.dmg \
-  --output dist/build.29/update \
+  --app dist/ordina.app \
+  --archive dist/ordina-1.9.6-build.34.dmg \
+  --output dist/update \
   --previous-feed dist/previous-appcast.xml
 ```
 
-首次发布时省略 `--previous-feed`。脚本会获取固定版本的官方 Sparkle 工具并验证下载校验值，使用钥匙串密钥签名，检查版本、最低系统、下载地址、文件大小和签名。生成时隔离当前安装包，以保留历史版本的下载链接。
+脚本会验证版本、最低系统、下载地址、文件大小和 Ed25519 签名，并隔离当前安装包以保留历史版本的下载链接。`prepare_update.py` **只生成本地清单，不发布任何东西**。
 
-## 发布顺序
+当前正式更新公钥位于 `config/Info.plist`，对应私钥保存在本机钥匙串。源码使用者发布自己的分支时，需要生成自己的密钥并配置自己的更新地址。
 
-1. 将安装包上传至 `v1.9.1-build.29` 对应的 GitHub Release，核对文件大小、SHA-256 和版本说明后发布。
-2. 将新生成的 `appcast.xml` 原样提交到仓库根目录，保留 `.nojekyll`。
-3. 等待 Pages 部署完成，运行 `python3 scripts/check_feeds.py --remote`。它会校验两份清单的签名，并逐个下载清单引用的资产，核对大小、SHA-256 与 Ed25519 签名；任一项不可用即以非零退出码结束。
-4. 使用独立测试副本验证检查、下载、安装、重启和设置保留，验证篡改包被拒绝。
+## 发布事务（强制顺序）
 
-已发布安装包保持原内容；同一构建号不能用于不同安装包。修改签名清单的任何字节都需要重新签名。源代码提交、签名和 GitHub 发布是独立步骤，私钥不会随源码上传。
+发布由 `scripts/release_transaction.py` 统一执行，软件与插件共用同一状态机。**硬不变式：签名清单只有在它引用的资产已被下载并验证之后才会被写入或推送。**
 
-当前构建采用临时签名、Hardened Runtime 和 App 级库验证例外，以加载 Sparkle。它未经过 Developer ID 签名与 Apple 公证，首次启动可能受到系统拦截。用户需要手动安装一次包含 Sparkle 的版本，随后可以在软件内更新。
+| 阶段 | 做什么 | 失败后果 |
+| --- | --- | --- |
+| `preflight` | 检查 main 分支、暂存区、与远端同步、GitHub 登录、签名工具 | 立即终止，无任何改动 |
+| `asset` | 创建 Release 并上传资产；同版本已存在则校验字节一致后复用 | 立即终止，不写清单 |
+| `gate` | **GET 下载地址**：HTTP 200、文件大小、SHA-256；软件版另验 Ed25519 签名 | **立即终止，绝不写清单** |
+| `feeds` | 生成并写入签名清单（含 registry、兼容清单、各插件清单） | 可能部分写入，需回滚 |
+| `push` | 提交并推送 `main` | 同上 |
+| `postflight` | 运行 `check_feeds.py --remote`，等待 Pages 生效（最多 6 次重试） | 报告失败，人工介入 |
 
-## 独立发布插件
-
-每个插件都有自己的发布仓库，插件版本与软件发行版、与其他插件完全分开。都不需要发布新的 ordina 版本。
-
-| 类型 | 插件 | 版本位置 | 发布仓库 |
-| --- | --- | --- | --- |
-| 单脚本 | multicam | 脚本内 `PLUGIN_VERSION` | `BrOKenAG/ordina-plugin-multicam` |
-| 单脚本 | yueliu（尚未发布） | 脚本内 `PLUGIN_VERSION` | `BrOKenAG/ordina-plugin-yueliu`（未创建） |
-| 插件包 | minutes（Minutes Roughcut） | `Minutes Roughcut/plugin.json` 的 `version` | `BrOKenAG/ordina-plugin-minutes` |
-
-维护者修改 `Integrations/OptionalPlugins` 下对应内容、递增版本，在已同步的 `main` 分支运行：
+软件发布：
 
 ```sh
-python3 scripts/publish_plugin.py minutes
-python3 scripts/publish_plugin.py multicam
+python3 scripts/publish_app_release.py \
+  --app dist/ordina.app \
+  --archive dist/ordina-1.9.6-build.34.dmg \
+  --feed dist/update/appcast.xml \
+  --notes-file dist/release-notes.txt
 ```
 
-脚本依次完成三件事：
+软件发布分两阶段：先发布 registry，并等待线上内容一致且完整检查通过；真实客户端验证通过后，再以显式参数发布 appcast。跨仓库发布不是原子操作，失败时保留已发布的资产，检查当前线上状态后重试或按已知良好版本回滚。
 
-1. 把不可变资产上传到该插件的发布仓库，标签为 `plugin-<name>-v<version>`。
-2. 更新该仓库的 `manifest.json` 并签名——1.9.5 及以后的客户端按插件读取各自的这份清单。
-3. 把同一条目同步进本仓库 `plugins/manifest.json`（合并清单），提交并推送——1.9.4 及更早的客户端只读这一份，兼容期内不能停更。
-
-需要 GitHub CLI 登录、发布权限和签名密钥。不要重用已发布的插件版本号；其他未提交改动不会被提交。发布后需要等两个仓库的 GitHub Pages 分别构建。用户的旧脚本会在安装时备份；离线时仍可使用应用内置版本。
-
-**新增插件**：先创建公开仓库 `ordina-plugin-<name>`，开启 Pages（`main` 分支根目录）并提交 `.nojekyll` 与初始 `manifest.json`；再在 `scripts/publish_plugin.py` 的 `REPOSITORIES`、`ASSET_NAMES` 与客户端 `PluginUpdates.feedURL(for:)` 中登记。客户端部分需要发布新的 ordina 版本；未登记清单的插件会回退到应用内置副本。
-
-**插件包（bundle）**：`minutes` 包含 Resolve 脚本、本地通信组件和 Chrome 扩展文件，发布时打包为一个确定性的 JSON 容器（`minutes.json`），清单中用 `kind: "bundle"` 标记。客户端下载后校验整体 SHA-256、逐文件校验路径白名单与体积，再用**应用自带**的 `install.py` 安装——下载内容不包含可执行安装逻辑。`install.py` 属于应用本身，修改它需要发布新的 ordina 版本。安装后写入 `installed.json` 版本标记，客户端据此判断是否可更新，不会再因与内置副本字节不同而误报。
-
-**不要删除清单引用的插件 Release**：各插件仓库的 `manifest.json`（兼容期内还有本仓库的合并清单）里的 `url` 直接指向 `plugin-<name>-v<version>` 资产。删除该 Release 后清单变成死链，已安装用户不受影响，但任何需要下载该版本的客户端都会失败。发布脚本要求版本递增，同版本无法重跑恢复，只能手工重建同名 Release 并上传**字节完全一致**的资产：
+插件发布：
 
 ```sh
-gh release create plugin-minutes-v0.2.0 minutes.json --repo BrOKenAG/ordina-plugin-minutes \
-  --title 'Minutes Roughcut v0.2.0' --notes '…' --latest=false
+python3 scripts/publish_plugin.py minutes \
+  --repo-path minutes=../ordina-plugin-minutes \
+  --repo-path multicam=../ordina-plugin-multicam
 ```
 
-重建前先用清单里的 `sha256` 核对文件，不一致会被客户端拒绝。用 `curl -sL -o /dev/null -w '%{http_code}' <url>` 确认恢复，应为 200；GitHub 对 HEAD 请求（`curl -I`）返回 404，不能用它判断。清理旧插件版本应在新版本发布、清单改指向新 Release 之后进行。
+两个入口都支持 `--dry-run`：走完整状态机但不产生任何网络或磁盘副作用，用于发布前演练。任一阶段失败会打印已完成阶段与建议操作，并以非零退出码结束。
 
-**校验**：`python3 scripts/check_feeds.py --remote` 会检查软件清单、合并清单与每个插件清单的签名，并逐个下载资产核对大小与 SHA-256。
+**绝不要**把「上传 DMG/插件资产」和「推送清单」拆成两条独立命令手工执行。1.9.3 与 1.9.5 发布时都曾因这种拆分导致清单短暂指向不存在的 Release：前者是清单漏推，客户端收不到更新；后者是 `gh release create` 网络报错但清单仍被推送。
 
-**兼容期**：本仓库的合并清单只服务于 1.9.4 及更早版本。确认没有这类活跃用户后，可以停止同步它，并删除 `plugins/manifest.json` 与发布脚本的第 3 步。
+## 发布前检查
 
-递增插件包版本时，同时更新 `Minutes Roughcut/plugin.json` 与 `extension/manifest.json` 中的版本号，避免 Chrome 显示的扩展版本落后于插件版本。用户在插件管理中点击「更新」即可完成替换；浏览器扩展无需重新加载，仍需在首次使用时按「一键准备浏览器扩展」的提示手动加载一次。
+```sh
+python3 scripts/build_feeds.py --check \
+  --repo-path minutes=../ordina-plugin-minutes \
+  --repo-path multicam=../ordina-plugin-multicam
+python3 scripts/check_feeds.py --preflight \
+  --repo-path minutes=../ordina-plugin-minutes \
+  --repo-path multicam=../ordina-plugin-multicam
+```
 
-**更新清单必须推送到仓库根目录**：客户端从 GitHub Pages 读取 `appcast.xml`，只上传 DMG 到 Release 而不提交清单，会导致用户收不到更新。发布顺序见上文「发布顺序」第 2 步。
+- `build_feeds.py --check` 确认所有现有签名清单都能由唯一源 `plugins/registry.source.json` 逐字节派生，防止有人手工改过清单。
+- `check_feeds.py --preflight` 验签本地清单、检查 registry 结构，并用**与客户端完全相同的规则**校验每个下载地址（github.com HTTPS、registry 下发的前缀、扩展名、版本与哈希格式）。预演模式不下载资产，因为此时资产尚未上传。
 
-如果文件已上传但清单尚未提交，可以在清单干净的情况下重跑同一命令，脚本只会复用内容完全一致的发布文件。如果提交完成但推送失败，检查 `git status` 和最近提交后执行 `git push origin main`；如果清单未提交，先检查并恢复清单再重试。
+## 发布后体检
+
+`postflight` 会自动运行，也可手动执行：
+
+```sh
+python3 scripts/check_feeds.py --remote
+```
+
+它从线上 Pages 读取 `appcast.xml`、`registry.json`、兼容清单和每个插件的独立清单，验签后逐个下载清单引用的资产，核对大小、SHA-256 与 Ed25519 签名；任一项不可用即以非零退出码结束。插件列表、feed 地址和允许的下载地址前缀全部来自签名 registry，脚本中不硬编码。
+
+## 失败与重试
+
+| 场景 | 处理 |
+| --- | --- |
+| `preflight` / `asset` 失败 | 修复后重跑同一命令，无副作用需清理 |
+| `gate` 失败 | 清单未被写入；检查 Release 资产后重跑同一命令（幂等） |
+| `feeds` / `push` 中途失败 | 先运行 `check_feeds.py --remote` 确认线上状态，再决定重试或回滚 |
+| `postflight` 因 Pages 未生效失败 | 事务内置重试；也可等几分钟后手动重跑体检 |
+| 同版本资产已存在且字节一致 | 自动复用，不重复创建 Release |
+| 同版本资产已存在但内容不同 | 拒绝发布，递增版本号 |
+| 误删了清单仍引用的 Release | 重建同名 Release 并上传**字节完全一致**的资产；源码未变时 `build_bundle()` 是确定性的 |
+
+判断资产是否可用要用 GET：`curl -sL -o /dev/null -w '%{http_code}' <url>` 应为 200。GitHub 对 HEAD 请求（`curl -I`）返回 404，不能用它判断。
+
+`publish_plugin.py` 要求版本递增，所以同版本**无法靠重跑脚本自愈**，只能手工重建 Release。清理旧插件版本必须在新版本发布、清单改指向新 Release 之后进行。
+
+## 回滚
+
+```sh
+python3 scripts/rollback_feeds.py --to HEAD~1 --dry-run
+python3 scripts/rollback_feeds.py --to HEAD~1 --push
+```
+
+它把 `appcast.xml`、`plugins/manifest.json`、`registry.json` 恢复到已知良好的提交。**绝不删除 Release**：删除旧清单仍引用的资产会给缓存了该清单的客户端造成死链。回滚后运行 `check_feeds.py --remote` 复核；各插件仓库的 `manifest.json` 需单独恢复，或用 `build_feeds.py --push` 从源重新生成。
+
+## 兼容期
+
+`plugins/manifest.json` 只服务于 1.9.4 及更早版本，由 `build_feeds.py` 从同一份源自动生成，不需要人工维护。确认没有这类活跃用户后，可在源中停止同步并删除该产物，但不要影响 1.9.5 读取的独立清单。
+
+当前构建采用临时签名、Hardened Runtime 和 App 级库验证例外，以加载 Sparkle；未经过 Developer ID 签名与 Apple 公证，首次启动可能受到系统拦截。
+
+插件分发的仓库拓扑、签名信任链与新增插件流程见 [插件分发架构](plugin-distribution.md)。

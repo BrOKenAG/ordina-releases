@@ -12,6 +12,19 @@ enum PluginUpdates {
         var isBundle: Bool { kind == "bundle" }
         var isScript: Bool { kind == nil || kind == "script" }
     }
+    // One signed registry tells the client where each plugin's feed lives and
+    // which download paths that feed is allowed to use. Plugin discovery and
+    // installation remain limited to types supported by this app version.
+    struct RegistryEntry: Decodable, Sendable {
+        let repository: String
+        let feed: String
+        let downloadPrefix: String
+        let kind: String?
+    }
+    private struct RegistryPayload: Decodable {
+        let format: Int
+        let plugins: [String: RegistryEntry]
+    }
     private struct Payload: Decodable { let format: Int; let plugins: [String: Entry] }
     private struct Envelope: Decodable { let payload: String; let signature: String }
     private struct Container: Decodable {
@@ -30,15 +43,10 @@ enum PluginUpdates {
             }
         }
     }
-    // Each plugin publishes its own signed feed so releases and versions stay separate.
-    // yueliu has no standalone feed yet and keeps using the bundled copy.
-    static func feedURL(for plugin: OptionalPlugin) -> URL? {
-        switch plugin {
-        case .minutes: return URL(string: "https://brokenag.github.io/ordina-plugin-minutes/manifest.json")
-        case .multicam: return URL(string: "https://brokenag.github.io/ordina-plugin-multicam/manifest.json")
-        case .yueliu: return nil
-        }
-    }
+
+    // The single bootstrap address. Everything below it is discovered from the
+    // signed registry, so no per-plugin feed URL is hardcoded in the app.
+    static let registryURL = URL(string: "https://brokenag.github.io/ordina-releases/registry.json")!
     static let publicKey = Data(base64Encoded: "90vua+GDSP8MSl6owCI/WSIkqBBuXO/AGw0ny4p67Bw=")!
     static let bundleLimit = 4_000_000
     static let bundleRequired = [
@@ -46,7 +54,71 @@ enum PluginUpdates {
         "extension/manifest.json",
     ]
 
-    static func verifiedEntry(_ data: Data, plugin: OptionalPlugin, publicKey: Data = publicKey) throws -> Entry {
+    private static let registryLock = NSLock()
+    private static var registryCache: (fetched: Date, entries: [String: RegistryEntry])?
+
+    private static func validPluginID(_ value: String) -> Bool {
+        value.range(of: #"^[a-z][a-z0-9-]{0,31}$"#, options: .regularExpression) != nil
+    }
+
+    // The registry is signed, but still constrain the shape of what it may
+    // point at: our Pages host, our GitHub releases, HTTPS only.
+    private static func validFeed(_ value: String) -> Bool {
+        guard let url = URL(string: value), url.scheme == "https",
+              url.host == "brokenag.github.io", url.user == nil, url.password == nil,
+              url.port == nil, url.query == nil, url.fragment == nil,
+              url.path.hasPrefix("/ordina-plugin-"),
+              url.path.hasSuffix("/manifest.json") else { return false }
+        return true
+    }
+
+    private static func validDownloadPrefix(_ value: String) -> Bool {
+        value.hasPrefix("/BrOKenAG/") && value.hasSuffix("/releases/download/")
+            && !value.contains("..") && !value.contains("//")
+    }
+
+    static func verifiedRegistry(_ data: Data, publicKey: Data = publicKey) throws -> [String: RegistryEntry] {
+        let envelope = try JSONDecoder().decode(Envelope.self, from: data)
+        guard let payload = Data(base64Encoded: envelope.payload), payload.count <= 65536,
+              let signature = Data(base64Encoded: envelope.signature),
+              let key = try? Curve25519.Signing.PublicKey(rawRepresentation: publicKey),
+              key.isValidSignature(signature, for: payload) else { throw Failure.invalid }
+        let document = try JSONDecoder().decode(RegistryPayload.self, from: payload)
+        guard document.format == 2 else { throw Failure.invalid }
+        var result: [String: RegistryEntry] = [:]
+        for (name, descriptor) in document.plugins {
+            guard validPluginID(name), validFeed(descriptor.feed),
+                  validDownloadPrefix(descriptor.downloadPrefix),
+                  descriptor.repository.hasPrefix("BrOKenAG/ordina-plugin-"),
+                  descriptor.kind == nil || descriptor.kind == "bundle" || descriptor.kind == "script"
+            else { throw Failure.invalid }
+            result[name] = descriptor
+        }
+        return result
+    }
+
+    // A failed signature is never downgraded to a cached or built-in value.
+    // Only a network failure may reuse a recently verified registry.
+    static func registryEntries(forceRefresh: Bool = false) throws -> [String: RegistryEntry] {
+        registryLock.lock()
+        defer { registryLock.unlock() }
+        if !forceRefresh, let cache = registryCache,
+           Date().timeIntervalSince(cache.fetched) < 300 { return cache.entries }
+        let data: Data
+        do {
+            data = try download(registryURL, maxBytes: 100_000)
+        } catch {
+            if let cache = registryCache { return cache.entries }
+            throw Failure.unavailable
+        }
+        let entries = try verifiedRegistry(data)
+        registryCache = (Date(), entries)
+        return entries
+    }
+
+    static func verifiedEntry(_ data: Data, plugin: OptionalPlugin,
+                              publicKey: Data = publicKey,
+                              allowedPrefix: String) throws -> Entry {
         let envelope = try JSONDecoder().decode(Envelope.self, from: data)
         guard let payload = Data(base64Encoded: envelope.payload), payload.count <= 65536,
               let signature = Data(base64Encoded: envelope.signature),
@@ -59,7 +131,7 @@ enum PluginUpdates {
         guard validVersion(entry.version), entry.sha256.range(of: "^[0-9a-f]{64}$", options: .regularExpression) != nil,
               let url = URL(string: entry.url), url.scheme == "https", url.host == "github.com",
               url.user == nil, url.password == nil, url.port == nil, url.query == nil, url.fragment == nil,
-              url.path.hasPrefix("/BrOKenAG/ordina-releases/releases/download/") else { throw Failure.invalid }
+              validDownloadPrefix(allowedPrefix), url.path.hasPrefix(allowedPrefix) else { throw Failure.invalid }
         if entry.isBundle {
             guard url.pathExtension == "json" else { throw Failure.invalid }
         } else {
@@ -198,8 +270,11 @@ enum PluginUpdates {
         return delegate.bytes
     }
     static func fetch(_ plugin: OptionalPlugin) throws -> Entry {
-        guard let url = feedURL(for: plugin) else { throw Failure.notPublished }
-        return try verifiedEntry(download(url, maxBytes: 100_000), plugin: plugin)
+        let descriptors = try registryEntries()
+        guard let descriptor = descriptors[plugin.id],
+              let url = URL(string: descriptor.feed) else { throw Failure.notPublished }
+        return try verifiedEntry(download(url, maxBytes: 100_000), plugin: plugin,
+                                 allowedPrefix: descriptor.downloadPrefix)
     }
     static func script(_ entry: Entry) throws -> Data {
         guard let url = URL(string: entry.url) else { throw Failure.invalid }

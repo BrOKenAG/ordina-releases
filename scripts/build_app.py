@@ -11,10 +11,18 @@ args = parser.parse_args()
 output = args.output.resolve()
 env = os.environ.copy()
 env.setdefault('DEVELOPER_DIR', '/Applications/Xcode.app/Contents/Developer')
-subprocess.run(['xcodebuild','-quiet','-project',str(root/'Ordina.xcodeproj'),'-scheme','Ordina',
-    '-configuration','Release','-destination','platform=macOS,arch=arm64','-derivedDataPath',str(root/'.build'),
-    'CODE_SIGN_IDENTITY=-','DEVELOPMENT_TEAM=','ARCHS=arm64','ONLY_ACTIVE_ARCH=NO',
-    'OTHER_SWIFT_FLAGS=$(inherited) -Xfrontend -disable-sandbox','build'],env=env,check=True)
+# Standard Xcode build. Run this from a local, non-sandboxed terminal (or from
+# Xcode itself): SwiftPM's "Resolve Package Graph" step invokes sandbox-exec,
+# which is denied inside agent/IDE sandboxes. No environment-specific compiler
+# workarounds belong in the official build path.
+try:
+    subprocess.run(['xcodebuild','-quiet','-project',str(root/'Ordina.xcodeproj'),'-scheme','Ordina',
+        '-configuration','Release','-destination','platform=macOS,arch=arm64','-derivedDataPath',str(root/'.build'),
+        'CODE_SIGN_IDENTITY=-','DEVELOPMENT_TEAM=','ARCHS=arm64','ONLY_ACTIVE_ARCH=NO','build'],env=env,check=True)
+except subprocess.CalledProcessError:
+    raise SystemExit('xcodebuild 失败。若报错包含 sandbox-exec / sandbox_apply: Operation not permitted，'
+                     '请在本地非沙盒终端（「终端」App）或 Xcode 内重新运行本脚本；'
+                     '这是运行环境的权限限制，不要改用临时编译方案。')
 prepared = root/'.build/Build/Products/Release'/name
 shutil.copyfile(root/'Integrations/Project Setup.py', prepared/'Contents/Resources/Project Setup.py')
 for plugin in ('Import YueLiu.py', 'Multicam Tools.py'):

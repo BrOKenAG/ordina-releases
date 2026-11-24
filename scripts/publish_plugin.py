@@ -1,55 +1,35 @@
 #!/usr/bin/env python3
-"""Publish one signed, independently updatable Resolve plugin.
+"""Publish one plugin release as a verified transaction.
 
-Every plugin owns a release repository, so plugin versions never mix with app
-releases or with each other. Single-file plugins are published as their .py
-source; bundle plugins are published as a signed JSON container holding
-base64-encoded files. The app's own installer performs the installation, so a
-downloaded bundle never carries executable installer logic.
+Order is fixed and enforced by release_transaction.execute():
+    preflight -> create/upload Release -> GATE (GET 200 + size + SHA-256)
+              -> write signed feeds -> push -> postflight
 
-The same entry is also written to the legacy combined feed in this repository,
-because ordina 1.9.4 and earlier read a single feed for all plugins.
+The registry source, the signed registry, the legacy combined feed and every
+per-plugin feed are all derived from ONE metadata source by build_feeds.py.
+None of them is maintained by hand.
 """
 import argparse
 import base64
 import hashlib
 import json
 import re
-import subprocess
+import sys
 import tempfile
 from pathlib import Path
-from urllib.parse import quote
-from sparkle_tools import ensure_tools, KEYCHAIN_ACCOUNT
 
-ROOT = Path(__file__).resolve().parents[1]
-FILES = {'multicam': 'Multicam Tools.py', 'yueliu': 'Import YueLiu.py'}
-BUNDLES = {'minutes': 'Minutes Roughcut'}
-REPOSITORIES = {
-    'minutes': 'BrOKenAG/ordina-plugin-minutes',
-    'multicam': 'BrOKenAG/ordina-plugin-multicam',
-    'yueliu': 'BrOKenAG/ordina-plugin-yueliu',
-}
-ASSET_NAMES = {
-    'minutes': 'minutes.json',
-    'multicam': 'Multicam.Tools.py',
-    'yueliu': 'Import.YueLiu.py',
-}
-# Combined feed for clients that predate per-plugin feeds. Remove once no
-# supported client reads it.
-LEGACY_FEED = ROOT / 'plugins/manifest.json'
+from build_feeds import entry, generate, load_source
+from release_transaction import (ROOT, Asset, DryRunGateway, FeedTarget,
+                                 LocalGateway, Plan, ReleaseError,
+                                 describe_failure, execute)
+
+SOURCE_PATH = ROOT / 'plugins' / 'registry.source.json'
 VERSION_RE = re.compile(r'^[0-9]+(?:\.[0-9]+){1,3}$')
 BUNDLE_REQUIRED = {
     'plugin.json', 'Minutes Roughcut.py', 'host.py', 'host.command',
     'extension/manifest.json',
 }
 BUNDLE_SKIP = {'__pycache__', '.DS_Store'}
-
-
-def run(*args):
-    result = subprocess.run(args, cwd=ROOT, text=True, capture_output=True)
-    if result.returncode != 0:
-        raise ValueError(result.stderr.strip() or '命令失败：' + ' '.join(args))
-    return result.stdout
 
 
 def version(data):
@@ -96,156 +76,114 @@ def build_bundle(directory):
     return data, ver
 
 
-def sign_document(document, sign, tmp):
-    """Sign a feed payload and return its bytes plus the signature."""
-    data = json.dumps(document, ensure_ascii=False, sort_keys=True,
-                      separators=(',', ':')).encode('utf-8')
-    payload = tmp / 'feed-payload.json'
-    payload.write_bytes(data)
-    signature = run(sign, '--account', KEYCHAIN_ACCOUNT, '-p', str(payload)).strip()
-    verify = subprocess.run([sign, '--account', KEYCHAIN_ACCOUNT, '--verify',
-                             str(payload), signature], capture_output=True, text=True)
-    if verify.returncode != 0:
-        raise ValueError('插件清单签名校验失败。')
-    return data, signature
-
-
-def verified_payload(envelope, sign, tmp, label):
-    """Decode a feed envelope after checking its signature."""
-    payload = tmp / 'existing-payload.json'
-    try:
-        payload.write_bytes(base64.b64decode(envelope['payload'], validate=True))
-    except (KeyError, ValueError):
-        raise ValueError(f'{label}格式无效。')
-    verify = subprocess.run([sign, '--account', KEYCHAIN_ACCOUNT, '--verify',
-                             str(payload), envelope.get('signature', '')],
-                            capture_output=True, text=True)
-    if verify.returncode != 0:
-        raise ValueError(f'{label}签名无效，拒绝覆盖。')
-    document = json.loads(payload.read_bytes())
-    if document.get('format') != 1 or not isinstance(document.get('plugins'), dict):
-        raise ValueError(f'{label}格式无效。')
-    return document
-
-
-def remote_envelope(repository):
-    """Return a plugin repository's feed envelope and blob sha, if it exists."""
-    result = subprocess.run(['gh', 'api', f'repos/{repository}/contents/manifest.json'],
-                            cwd=ROOT, text=True, capture_output=True)
-    if result.returncode != 0:
-        return None, None
-    content = json.loads(result.stdout)
-    return json.loads(base64.b64decode(content['content'])), content['sha']
-
-
-def put_remote(repository, sha, envelope, message):
-    body = {
-        'message': message,
-        'content': base64.b64encode(
-            json.dumps(envelope, ensure_ascii=False, separators=(',', ':')).encode() + b'\n').decode(),
-    }
-    if sha:
-        body['sha'] = sha
-    result = subprocess.run(
-        ['gh', 'api', '-X', 'PUT', f'repos/{repository}/contents/manifest.json', '--input', '-'],
-        cwd=ROOT, text=True, input=json.dumps(body), capture_output=True)
-    if result.returncode != 0:
-        raise ValueError(result.stderr.strip() or '更新插件清单失败。')
-
-
-def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument('plugin', choices=sorted([*FILES, *BUNDLES]))
-    args = parser.parse_args()
-    is_bundle = args.plugin in BUNDLES
-    display = BUNDLES[args.plugin] if is_bundle else FILES[args.plugin][:-3]
-    source = ROOT / 'Integrations/OptionalPlugins' / (BUNDLES[args.plugin] if is_bundle else FILES[args.plugin])
-    if is_bundle:
+def build_asset(meta):
+    source = ROOT / 'Integrations' / 'OptionalPlugins' / meta['source']
+    if meta['kind'] == 'bundle':
         data, ver = build_bundle(source)
     else:
         data = source.read_bytes()
         ver = version(data)
-    repository = REPOSITORIES[args.plugin]
-    asset_name = ASSET_NAMES[args.plugin]
-    tag = f'plugin-{args.plugin}-v{ver}'
-    if run('git', 'branch', '--show-current').strip() != 'main':
-        raise ValueError('请在 main 分支发布。')
-    if run('git', 'diff', '--cached', '--name-only').strip():
-        raise ValueError('暂存区有其他改动，请先处理。')
-    if LEGACY_FEED.exists() and run('git', 'status', '--porcelain', '--',
-                                    str(LEGACY_FEED.relative_to(ROOT))).strip():
-        raise ValueError('兼容清单有未提交的更改，请先处理。')
-    # A remote change must never be overwritten or silently omitted.
-    run('git', 'fetch', 'origin', 'main')
-    if run('git', 'rev-parse', 'HEAD').strip() != run('git', 'rev-parse', 'origin/main').strip():
-        raise ValueError('本地 main 与远端不一致，请先同步。')
-    sign = str(ensure_tools() / 'sign_update')
+    return source, data, ver
 
-    with tempfile.TemporaryDirectory(prefix='ordina-plugin-release-') as temporary:
-        tmp = Path(temporary)
-        asset = tmp / asset_name
-        asset.write_bytes(data)
 
-        # 1. The plugin's own repository is authoritative for its released version.
-        envelope, blob_sha = remote_envelope(repository)
-        previous_entries = {}
-        if envelope:
-            previous_entries = verified_payload(envelope, sign, tmp, '插件仓库清单')['plugins']
-        elif LEGACY_FEED.exists():
-            previous_entries = verified_payload(
-                json.loads(LEGACY_FEED.read_text(encoding='utf-8')), sign, tmp, '兼容清单')['plugins']
-        previous = previous_entries.get(args.plugin)
-        if previous and tuple(map(int, ver.split('.'))) <= tuple(map(int, previous['version'].split('.'))):
-            raise ValueError('插件版本必须高于已发布版本。')
+def parse_repo_paths(items):
+    result = {}
+    for item in items:
+        name, separator, value = item.partition('=')
+        if not separator or not name or not value:
+            raise ValueError('--repo-path 需要 NAME=PATH 格式：' + item)
+        result[name] = Path(value).expanduser().resolve()
+    return result
 
-        entry = {
+
+def main():
+    plugins = load_source()
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('plugin', choices=sorted(plugins))
+    parser.add_argument('--repo-path', action='append', default=[], metavar='NAME=PATH',
+                        help='插件本地克隆路径，可重复；用于同步写入 manifest.json')
+    parser.add_argument('--dry-run', action='store_true',
+                        help='走完整流程但不产生任何网络或磁盘副作用')
+    parser.add_argument('--timeout', type=int, default=300)
+    args = parser.parse_args()
+
+    try:
+        if not args.dry_run:
+            raise ValueError('跨仓库插件发布暂不可用；需先完成部分失败恢复验证。')
+        name = args.plugin
+        meta = plugins[name]
+        source, data, ver = build_asset(meta)
+        previous = meta.get('version')
+        if previous and tuple(map(int, ver.split('.'))) <= tuple(map(int, previous.split('.'))):
+            if not args.dry_run:
+                raise ValueError(f'插件版本 {ver} 必须高于已发布版本 {previous}。')
+            print(f'预演：版本 {ver} 未递增，真实发布会在 preflight 前被拒绝', file=sys.stderr)
+
+        # Compute the new source and every derived feed in memory. Nothing is
+        # written to disk until the GATE has passed.
+        document = json.loads(SOURCE_PATH.read_text(encoding='utf-8'))
+        document['plugins'][name].update({
             'version': ver,
-            'url': f'https://github.com/{repository}/releases/download/{tag}/{quote(asset_name)}',
             'sha256': hashlib.sha256(data).hexdigest(),
-        }
-        if is_bundle:
-            entry['kind'] = 'bundle'
+            'size': len(data),
+            'published': True,
+        })
+        source_bytes = (json.dumps(document, ensure_ascii=False, indent=2)
+                        + '\n').encode('utf-8')
+        generated = generate(document['plugins'])
 
-        # 2. Publish the immutable asset before any feed references it.
-        exists = subprocess.run(['gh', 'release', 'view', tag, '--repo', repository], cwd=ROOT,
-                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0
-        if exists:
-            # A retry may reuse an already uploaded asset only when it is identical.
-            downloaded = tmp / 'downloaded'
-            downloaded.mkdir()
-            run('gh', 'release', 'download', tag, '--repo', repository,
-                '--pattern', asset_name, '--dir', str(downloaded))
-            if (downloaded / asset_name).read_bytes() != data:
-                raise ValueError('该版本已有不同的发布文件，请递增版本号。')
+        target = document['plugins'][name]
+        asset_url = entry(name, target)['url']
+        tag = f'plugin-{name}-v{ver}'
+        display = meta['source']
+
+        repo_paths = parse_repo_paths(args.repo_path)
+        feeds = [
+            FeedTarget('registry', generated['registry'][1], path=ROOT / 'registry.json'),
+            FeedTarget('legacy', generated['legacy'][1],
+                       path=ROOT / 'plugins' / 'manifest.json'),
+            FeedTarget('source', source_bytes, path=SOURCE_PATH),
+        ]
+        for label, (doc, envelope_data) in generated.items():
+            if not label.startswith('plugin:'):
+                continue
+            plugin_name = label.split(':', 1)[1]
+            clone = repo_paths.get(plugin_name)
+            feeds.append(FeedTarget(
+                label, envelope_data,
+                path=clone / 'manifest.json' if clone else None,
+                repository=document['plugins'][plugin_name]['repository'],
+            ))
+
+        plan = Plan(
+            label=f'{display} v{ver}',
+            repository=target['repository'],
+            tag=tag,
+            title=f'{display} v{ver}',
+            notes=f'{display} v{ver}',
+            asset=Asset(target['asset'], data, asset_url),
+            feeds=feeds,
+            commit_paths=['registry.json', 'plugins/manifest.json',
+                          'plugins/registry.source.json',
+                          str(source.relative_to(ROOT))],
+            commit_message=f'Publish {name} plugin v{ver}',
+        )
+
+        with tempfile.TemporaryDirectory(prefix='ordina-plugin-release-') as temporary:
+            tmp = Path(temporary)
+            gateway = (DryRunGateway(data) if args.dry_run else LocalGateway())
+            result = execute(plan, gateway, tmp, args.timeout)
+
+        if args.dry_run:
+            print(f'预演通过：{plan.label} → {plan.repository}')
+            print('阶段：' + ' → '.join(result['stages']))
+            print('清单：' + ', '.join(f.label for f in feeds))
         else:
-            run('gh', 'release', 'create', tag, str(asset), '--repo', repository,
-                '--title', f'{display} v{ver}', '--notes', f'{display} v{ver}', '--latest=false')
-        print(f'已上传 {repository} {tag}/{asset_name}')
-
-        # 3. Point the plugin's own feed at it.
-        plugin_bytes, plugin_signature = sign_document(
-            {'format': 1, 'plugins': {args.plugin: entry}}, sign, tmp)
-        put_remote(repository, blob_sha,
-                   {'payload': base64.b64encode(plugin_bytes).decode(), 'signature': plugin_signature},
-                   f'Publish {display} v{ver}')
-
-        # 4. Mirror the entry into the legacy combined feed for older clients.
-        combined = {'format': 1, 'plugins': {}}
-        if LEGACY_FEED.exists():
-            combined = verified_payload(json.loads(LEGACY_FEED.read_text(encoding='utf-8')),
-                                        sign, tmp, '兼容清单')
-        combined['plugins'][args.plugin] = entry
-        combined_bytes, combined_signature = sign_document(combined, sign, tmp)
-        LEGACY_FEED.parent.mkdir(parents=True, exist_ok=True)
-        LEGACY_FEED.write_text(json.dumps(
-            {'payload': base64.b64encode(combined_bytes).decode(), 'signature': combined_signature},
-            ensure_ascii=False, separators=(',', ':')) + '\n', encoding='utf-8')
-
-        run('git', 'add', '--', str(source.relative_to(ROOT)), str(LEGACY_FEED.relative_to(ROOT)))
-        run('git', 'commit', '-m', f'Publish {args.plugin} plugin v{ver}', '--',
-            str(source.relative_to(ROOT)), str(LEGACY_FEED.relative_to(ROOT)))
-        run('git', 'push', 'origin', 'main')
-    print(f'已发布 {display} v{ver}（{"插件包" if is_bundle else "单脚本"}）到 {repository}，兼容清单已同步。')
+            print(f'已发布 {plan.label}（{result["asset"]}）到 {plan.repository}')
+    except ReleaseError as error:
+        sys.exit(describe_failure(error))
+    except (ValueError, OSError) as error:
+        sys.exit(f'发布失败：{error}')
 
 
 if __name__ == '__main__':

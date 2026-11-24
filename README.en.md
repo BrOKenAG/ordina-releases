@@ -74,6 +74,13 @@ python3 scripts/build_app.py --output dist/ordina.app
 
 You can also open `Ordina.xcodeproj` in Xcode and select the `Ordina` scheme. Run the source verification suite with `python3 scripts/verify.py`.
 
+The build script uses standard `xcodebuild` and must run from a local, non-sandboxed terminal (or from Xcode itself). SwiftPM resolves package dependencies through `sandbox-exec`, which is denied in sandboxed automation environments (`sandbox_apply: Operation not permitted`). This is an environment permission limit, not a project configuration issue; check a terminal first with `/usr/bin/sandbox-exec -p '(version 1)(allow default)' /bin/echo OK`.
+
+## Project documentation
+
+- [Build and release workflow](docs/releases.md) — standard Xcode build, transactional publishing, checks, retries and rollback.
+- [Plugin distribution architecture](docs/plugin-distribution.md) — per-plugin repositories, the signed registry and client compatibility.
+
 ## Feedback
 
 ordina is under active development. Bug reports and descriptions of your editing workflow are welcome in [GitHub Issues](https://github.com/BrOKenAG/ordina-releases/issues). Please omit private project names and file paths when sharing logs or screenshots.
