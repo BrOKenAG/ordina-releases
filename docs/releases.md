@@ -46,33 +46,45 @@ python3 scripts/prepare_update.py \
 
 ## 独立发布插件
 
-插件有两类，都不需要发布新的 ordina 版本：
+每个插件都有自己的发布仓库，插件版本与软件发行版、与其他插件完全分开。都不需要发布新的 ordina 版本。
 
-| 类型 | 插件 | 版本位置 | 发布命令 |
+| 类型 | 插件 | 版本位置 | 发布仓库 |
 | --- | --- | --- | --- |
-| 单脚本 | multicam、yueliu | 脚本内 `PLUGIN_VERSION` | `python3 scripts/publish_plugin.py multicam` |
-| 插件包 | minutes（Minutes Roughcut） | `Minutes Roughcut/plugin.json` 的 `version` | `python3 scripts/publish_plugin.py minutes` |
+| 单脚本 | multicam | 脚本内 `PLUGIN_VERSION` | `BrOKenAG/ordina-plugin-multicam` |
+| 单脚本 | yueliu（尚未发布） | 脚本内 `PLUGIN_VERSION` | `BrOKenAG/ordina-plugin-yueliu`（未创建） |
+| 插件包 | minutes（Minutes Roughcut） | `Minutes Roughcut/plugin.json` 的 `version` | `BrOKenAG/ordina-plugin-minutes` |
 
-维护者修改 `Integrations/OptionalPlugins` 下对应内容、递增版本，在已同步的 `main` 分支运行上表命令。例如：
+维护者修改 `Integrations/OptionalPlugins` 下对应内容、递增版本，在已同步的 `main` 分支运行：
 
 ```sh
-python3 scripts/publish_plugin.py multicam
-python3 scripts/publish_plugin.py yueliu
 python3 scripts/publish_plugin.py minutes
+python3 scripts/publish_plugin.py multicam
 ```
 
-脚本使用原有 Sparkle 钥匙串密钥对插件清单签名，先发布不可变插件文件，再提交并推送清单与该插件源码。需要 GitHub CLI 登录、发布权限和签名密钥。不要重用已发布的插件版本号；其他未提交改动不会被提交。发布后等待 GitHub Pages 更新。用户的旧脚本会在安装时备份；离线时仍可使用应用内置版本。
+脚本依次完成三件事：
+
+1. 把不可变资产上传到该插件的发布仓库，标签为 `plugin-<name>-v<version>`。
+2. 更新该仓库的 `manifest.json` 并签名——1.9.5 及以后的客户端按插件读取各自的这份清单。
+3. 把同一条目同步进本仓库 `plugins/manifest.json`（合并清单），提交并推送——1.9.4 及更早的客户端只读这一份，兼容期内不能停更。
+
+需要 GitHub CLI 登录、发布权限和签名密钥。不要重用已发布的插件版本号；其他未提交改动不会被提交。发布后需要等两个仓库的 GitHub Pages 分别构建。用户的旧脚本会在安装时备份；离线时仍可使用应用内置版本。
+
+**新增插件**：先创建公开仓库 `ordina-plugin-<name>`，开启 Pages（`main` 分支根目录）并提交 `.nojekyll` 与初始 `manifest.json`；再在 `scripts/publish_plugin.py` 的 `REPOSITORIES`、`ASSET_NAMES` 与客户端 `PluginUpdates.feedURL(for:)` 中登记。客户端部分需要发布新的 ordina 版本；未登记清单的插件会回退到应用内置副本。
 
 **插件包（bundle）**：`minutes` 包含 Resolve 脚本、本地通信组件和 Chrome 扩展文件，发布时打包为一个确定性的 JSON 容器（`minutes.json`），清单中用 `kind: "bundle"` 标记。客户端下载后校验整体 SHA-256、逐文件校验路径白名单与体积，再用**应用自带**的 `install.py` 安装——下载内容不包含可执行安装逻辑。`install.py` 属于应用本身，修改它需要发布新的 ordina 版本。安装后写入 `installed.json` 版本标记，客户端据此判断是否可更新，不会再因与内置副本字节不同而误报。
 
-**不要删除清单仍引用的插件 Release**：`plugins/manifest.json` 的 `url` 直接指向 `plugin-<name>-v<version>` 的资产。删除该 Release 后清单变成死链，已安装用户不受影响，但任何需要下载该版本的客户端都会失败。发布脚本要求版本递增，同版本无法重跑恢复，只能手工重建同名 Release 并上传**字节完全一致**的资产：
+**不要删除清单引用的插件 Release**：各插件仓库的 `manifest.json`（兼容期内还有本仓库的合并清单）里的 `url` 直接指向 `plugin-<name>-v<version>` 资产。删除该 Release 后清单变成死链，已安装用户不受影响，但任何需要下载该版本的客户端都会失败。发布脚本要求版本递增，同版本无法重跑恢复，只能手工重建同名 Release 并上传**字节完全一致**的资产：
 
 ```sh
-gh release create plugin-minutes-v0.2.0 minutes.json \
+gh release create plugin-minutes-v0.2.0 minutes.json --repo BrOKenAG/ordina-plugin-minutes \
   --title 'Minutes Roughcut v0.2.0' --notes '…' --latest=false
 ```
 
-重建前先用清单里的 `sha256` 核对文件，不一致会被客户端拒绝。用 `curl -sL -o /dev/null -w '%{http_code}' <url>` 确认恢复，应为 200；GitHub 对 HEAD 请求（`curl -I`）返回 404，不能用它判断。清理旧插件版本应在新版本发布、清单改指向新 Release 之后进行。日常或误删后可用 `python3 scripts/check_feeds.py --remote` 一次性复核软件与插件两份清单。
+重建前先用清单里的 `sha256` 核对文件，不一致会被客户端拒绝。用 `curl -sL -o /dev/null -w '%{http_code}' <url>` 确认恢复，应为 200；GitHub 对 HEAD 请求（`curl -I`）返回 404，不能用它判断。清理旧插件版本应在新版本发布、清单改指向新 Release 之后进行。
+
+**校验**：`python3 scripts/check_feeds.py --remote` 会检查软件清单、合并清单与每个插件清单的签名，并逐个下载资产核对大小与 SHA-256。
+
+**兼容期**：本仓库的合并清单只服务于 1.9.4 及更早版本。确认没有这类活跃用户后，可以停止同步它，并删除 `plugins/manifest.json` 与发布脚本的第 3 步。
 
 递增插件包版本时，同时更新 `Minutes Roughcut/plugin.json` 与 `extension/manifest.json` 中的版本号，避免 Chrome 显示的扩展版本落后于插件版本。用户在插件管理中点击「更新」即可完成替换；浏览器扩展无需重新加载，仍需在首次使用时按「一键准备浏览器扩展」的提示手动加载一次。
 

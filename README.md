@@ -63,7 +63,7 @@ Minutes Roughcut 把飞书妙记页面上的划稿保留区间发送到 DaVinci 
 
 **使用**：打开飞书妙记页面，在扩展中点「发送到达芬奇」，把保留区间直接发送给已打开的 Resolve 项目；也可以导出 JSON，再从 Resolve 的「工作区 → 脚本 → Minutes Roughcut」导入。需要 macOS、Chrome 和 DaVinci Resolve Studio；浏览器直连时 Resolve 需已打开工程。
 
-**更新**：Minutes Roughcut 以签名插件包独立发布。插件管理会检查在线版本并直接更新，不需要重新安装 ordina。
+**更新**：Minutes Roughcut 通过独立的签名发布仓库分发，与 ordina 软件更新分开。插件管理会检查在线版本并直接更新，不需要重新安装 ordina。
 
 > 该插件为测试版。生成粗剪会重建时间线，可能无法保留部分特效、调色及链接，建议先在工程副本中试用并核对素材来源与时间起点。飞书页面或内部接口变化可能影响划稿提取。安装不会上传素材；被替换的旧文件会备份到 `~/Library/Application Support/Minutes Roughcut/backups`。
 

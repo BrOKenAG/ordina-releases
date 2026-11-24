@@ -54,7 +54,7 @@ Minutes Roughcut sends the ranges you keep in a Feishu Minutes transcript to DaV
 
 **Use.** Open a Feishu Minutes page and choose **Send to Resolve** in the extension while a Resolve project is open. You can also export a JSON file and import it from **Workspace → Scripts → Minutes Roughcut** in Resolve. Requires macOS, Chrome, and DaVinci Resolve Studio.
 
-**Updates.** Minutes Roughcut is published as a signed plugin bundle. The plugin manager checks for online versions and installs them directly, without a new ordina release.
+**Updates.** Minutes Roughcut is distributed from its own signed release repository, separate from ordina app updates. The plugin manager checks for online versions and installs them directly, without a new ordina release.
 
 > This plugin is experimental. Building the rough cut recreates the timeline and may not preserve some effects, grades, or links; try it on a project copy and verify the source media and start timecode first. Changes to Feishu pages or internal APIs can affect transcript extraction. Installation does not upload media; replaced files are backed up under `~/Library/Application Support/Minutes Roughcut/backups`.
 
