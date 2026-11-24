@@ -6,6 +6,16 @@ IMPORTANT: This file was signed by Sparkle. Any modifications to this file requi
     <channel>
         <title>ordina</title>
         <item>
+            <title>1.9.5</title>
+            <pubDate>Tue, 24 Nov 2026 17:14:24 +0800</pubDate>
+            <link>https://github.com/BrOKenAG/ordina-releases/releases</link>
+            <sparkle:version>33</sparkle:version>
+            <sparkle:shortVersionString>1.9.5</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>26.0</sparkle:minimumSystemVersion>
+            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
+            <enclosure url="https://github.com/BrOKenAG/ordina-releases/releases/download/v1.9.5-build.33/ordina-1.9.5-build.33.dmg" length="2078082" type="application/octet-stream" sparkle:edSignature="vzoj3A4EvlJabSxWMy2WkVueG2CEvtqGY+btsIITB0TcWUc1TmEU5+mh+tB7K9+Pceku0A0+X4GBGqTjVUilCg=="/>
+        </item>
+        <item>
             <title>1.9.4</title>
             <pubDate>Tue, 24 Nov 2026 16:15:20 +0800</pubDate>
             <link>https://github.com/BrOKenAG/ordina-releases/releases</link>
@@ -25,19 +35,9 @@ IMPORTANT: This file was signed by Sparkle. Any modifications to this file requi
             <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
             <enclosure url="https://github.com/BrOKenAG/ordina-releases/releases/download/v1.9.3-build.31/ordina-1.9.3-build.31.dmg" length="2111024" type="application/octet-stream" sparkle:edSignature="I1RGkzVw63LvW3V4R7f+bHQfHpvO0EWFjKt7GjZ5rT+TA9CKzgOBvfh5drfLGnJpBY0IDR9nDCimd5wvTVIHCw=="/>
         </item>
-        <item>
-            <title>1.9.2</title>
-            <pubDate>Sat, 21 Nov 2026 16:19:02 +0800</pubDate>
-            <link>https://github.com/BrOKenAG/ordina-releases/releases</link>
-            <sparkle:version>30</sparkle:version>
-            <sparkle:shortVersionString>1.9.2</sparkle:shortVersionString>
-            <sparkle:minimumSystemVersion>26.0</sparkle:minimumSystemVersion>
-            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
-            <enclosure url="https://github.com/BrOKenAG/ordina-releases/releases/download/v1.9.2-build.30/ordina-1.9.2-build.30.dmg" length="2083283" type="application/octet-stream" sparkle:edSignature="D6lmgN5daN4avSZuszFwdSb+Wh5qzfoHTu21jYlxTcJYlGuW2mNlAPXTGFfWilhzGYvr/Z7mhHMKfpiqRt/oCg=="/>
-        </item>
     </channel>
 </rss>
 <!-- sparkle-signatures:
-edSignature: dZ1duyO68mUmUlxqAx2HW5H2KhTCcXQpQKROCfPgthlO+2bsRRisR+dB2h/WJqnNMi6nuXo/WWn0qY280a26Aw==
+edSignature: rru+L7qLB3SfW5JqYcI72OfVYl2S4zevJ+9c2LogKXu5R4K/lba37vUY/kMsG+FSG0GnvUzT9wEQEBEG7xtOAQ==
 length: 2776
 -->
