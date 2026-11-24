@@ -30,7 +30,15 @@ enum PluginUpdates {
             }
         }
     }
-    static let feedURL = URL(string: "https://brokenag.github.io/ordina-releases/plugins/manifest.json")!
+    // Each plugin publishes its own signed feed so releases and versions stay separate.
+    // yueliu has no standalone feed yet and keeps using the bundled copy.
+    static func feedURL(for plugin: OptionalPlugin) -> URL? {
+        switch plugin {
+        case .minutes: return URL(string: "https://brokenag.github.io/ordina-plugin-minutes/manifest.json")
+        case .multicam: return URL(string: "https://brokenag.github.io/ordina-plugin-multicam/manifest.json")
+        case .yueliu: return nil
+        }
+    }
     static let publicKey = Data(base64Encoded: "90vua+GDSP8MSl6owCI/WSIkqBBuXO/AGw0ny4p67Bw=")!
     static let bundleLimit = 4_000_000
     static let bundleRequired = [
@@ -190,7 +198,8 @@ enum PluginUpdates {
         return delegate.bytes
     }
     static func fetch(_ plugin: OptionalPlugin) throws -> Entry {
-        try verifiedEntry(download(feedURL, maxBytes: 100_000), plugin: plugin)
+        guard let url = feedURL(for: plugin) else { throw Failure.notPublished }
+        return try verifiedEntry(download(url, maxBytes: 100_000), plugin: plugin)
     }
     static func script(_ entry: Entry) throws -> Data {
         guard let url = URL(string: entry.url) else { throw Failure.invalid }

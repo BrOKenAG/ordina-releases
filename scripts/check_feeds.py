@@ -24,6 +24,12 @@ from sparkle_tools import KEYCHAIN_ACCOUNT, ensure_tools
 
 ROOT = Path(__file__).resolve().parents[1]
 PAGES = 'https://brokenag.github.io/ordina-releases'
+# Every plugin publishes its own feed; the combined feed is kept only for
+# ordina 1.9.4 and earlier.
+PLUGINS = {
+    'minutes': 'ordina-plugin-minutes',
+    'multicam': 'ordina-plugin-multicam',
+}
 SPARKLE = '{http://www.andymatuschak.org/xml-namespaces/sparkle}'
 CURL = '/usr/bin/curl'
 
@@ -88,12 +94,12 @@ def check_appcast(path, tool, tmp, latest_only, timeout):
     return rows
 
 
-def check_plugins(path, tool, tmp, timeout):
+def check_plugins(label, path, tool, tmp, timeout):
     rows = []
     envelope = json.loads(path.read_text(encoding='utf-8'))
-    payload = tmp / 'plugins-payload.json'
+    payload = tmp / f'{label}-payload.json'
     payload.write_bytes(base64.b64decode(envelope['payload'], validate=True))
-    rows.append(('插件清单签名', status(verify(tool, payload, envelope['signature'])), ''))
+    rows.append((f'{label} 签名', status(verify(tool, payload, envelope['signature'])), ''))
     document = json.loads(payload.read_bytes())
     for name, entry in sorted(document['plugins'].items()):
         label = f'插件 {name} v{entry["version"]}'
@@ -139,7 +145,16 @@ def main():
             print('来源：本地清单\n')
 
         rows = check_appcast(appcast, tool, tmp, args.latest, args.timeout)
-        rows += check_plugins(plugins, tool, tmp, args.timeout)
+        rows += check_plugins('兼容清单', plugins, tool, tmp, args.timeout)
+        if args.remote:
+            for name, repository in sorted(PLUGINS.items()):
+                url = f'https://brokenag.github.io/{repository}/manifest.json?t={stamp}'
+                dest = tmp / f'{name}-manifest.json'
+                code = curl(url, dest, args.timeout)
+                if code != '200':
+                    rows.append((f'{name} 清单', 'FAIL', f'HTTP {code} {url}'))
+                    continue
+                rows += check_plugins(name, dest, tool, tmp, args.timeout)
 
     width = max(len(row[0]) for row in rows)
     failures = sum(1 for row in rows if row[1] == 'FAIL')
