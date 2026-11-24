@@ -1,8 +1,10 @@
 # ordina
 
+[English](README.en.md) · [中文](README.md)
+
 A macOS companion for DaVinci Resolve that helps editors set up projects and keep project media organized.
 
-[Download the latest release](https://github.com/BrOKenAG/ordina-releases/releases/latest) · [Report an issue](https://github.com/BrOKenAG/ordina-releases/issues) · [中文说明](https://github.com/BrOKenAG/ordina-releases/blob/main/README.md)
+[Download the latest release](https://github.com/BrOKenAG/ordina-releases/releases/latest) · [Report an issue](https://github.com/BrOKenAG/ordina-releases/issues)
 
 ## What it does
 
@@ -12,6 +14,7 @@ A macOS companion for DaVinci Resolve that helps editors set up projects and kee
 - Register original footage folders and scan for media referenced from other locations. When automatic archiving is enabled, eligible files are copied and verified before Resolve references are updated. Original files are retained; some media types require manual review.
 - Install bundled Resolve scripts or add Python scripts from your computer.
 - Check for app updates from within ordina.
+- Update plugin bundles independently of the app: Minutes Roughcut can be updated without installing a new ordina release.
 
 ## Requirements
 
@@ -19,6 +22,7 @@ A macOS companion for DaVinci Resolve that helps editors set up projects and kee
 - DaVinci Resolve Studio for Resolve integration and scripts. Folder creation works independently.
 - Enable **External scripting using: Local** in Resolve's system preferences.
 - The Resolve connection uses `/usr/bin/python3`; install Xcode Command Line Tools if macOS requests them.
+- Minutes Roughcut additionally requires Google Chrome; sending ranges directly from the browser needs an open Resolve project.
 
 ## Install and get started
 
@@ -38,8 +42,21 @@ The current release is ad-hoc signed and has not been notarized by Apple. On fir
 | Project Setup | Set resolution and frame rate, initialize media pool folders and a frame-rate-locking timeline, and view archive status. |
 | Import YueLiu | Import review comments exported from YueLiu. Requires `openpyxl` in Resolve's Python environment. |
 | Multicam Tools | Assist with camera-angle naming and multicamera assembly. |
+| Minutes Roughcut | Send the ranges you keep in a Feishu Minutes transcript to Resolve and build a rough-cut timeline. Requires a Chrome extension. |
 
-Install scripts from ordina's plugin manager. Restart Resolve if a newly installed script does not appear in its menu.
+Install or update scripts from ordina's plugin manager. Open them from Resolve's **Workspace → Scripts → Utility** menu; restart Resolve if a newly installed script does not appear. Import YueLiu needs `openpyxl` in Resolve's Python environment. Minutes Roughcut also includes a browser extension; see below.
+
+## Minutes Roughcut
+
+Minutes Roughcut sends the ranges you keep in a Feishu Minutes transcript to DaVinci Resolve and builds a rough-cut timeline from them. It ships as a Resolve script, a Chrome extension, and a local messaging host.
+
+**Install.** Install Minutes Roughcut in **Settings → Plugin Manager**, then choose **Prepare Browser Extension**. ordina copies the extension folder path to the clipboard, opens `chrome://extensions` in Chrome, and reveals the folder in Finder. In Chrome, enable **Developer mode**, choose **Load unpacked**, and press ⌘⇧G to paste the copied path. Chrome does not allow third-party apps to silently install unpacked extensions, so these two steps cannot be automated.
+
+**Use.** Open a Feishu Minutes page and choose **Send to Resolve** in the extension while a Resolve project is open. You can also export a JSON file and import it from **Workspace → Scripts → Minutes Roughcut** in Resolve. Requires macOS, Chrome, and DaVinci Resolve Studio.
+
+**Updates.** Minutes Roughcut is published as a signed plugin bundle. The plugin manager checks for online versions and installs them directly, without a new ordina release.
+
+> This plugin is experimental. Building the rough cut recreates the timeline and may not preserve some effects, grades, or links; try it on a project copy and verify the source media and start timecode first. Changes to Feishu pages or internal APIs can affect transcript extraction. Installation does not upload media; replaced files are backed up under `~/Library/Application Support/Minutes Roughcut/backups`.
 
 ## Media archiving
 

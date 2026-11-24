@@ -20,6 +20,7 @@
 - 创建文件夹可以独立使用。
 - Resolve 工程创建及插件功能需要 DaVinci Resolve Studio，并将「偏好设置 → 系统 → 常规 → 外部脚本使用」设为「本地」。
 - Resolve 连接组件使用系统 `/usr/bin/python3`。若系统提示缺少开发工具，先安装 Xcode 命令行工具。
+- Minutes Roughcut 额外需要 Google Chrome；从浏览器直接发送时，Resolve 需已打开工程。
 
 ## 安装与使用
 
@@ -39,7 +40,7 @@
 | 项目目录 | 自定义文件夹模板、记住保存位置，支持本地磁盘、外置盘和已挂载 NAS |
 | Resolve 工程 | 支持已登记的本地及 PostgreSQL 项目库，保存工程关联，按关联打开工程 |
 | 全部项目 | 查看项目目录，打开文件夹或已关联的 Resolve 工程 |
-| 插件管理 | 查看已安装脚本，安装内置插件，拖入或选择 `.py` 脚本安装到 Resolve |
+| 插件管理 | 查看已安装脚本，安装内置插件，拖入或选择 `.py` 脚本安装到 Resolve，检查并更新在线插件 |
 | 素材归档 | 登记原始素材位置，扫描临时素材，复制、校验后更新 Resolve 引用 |
 | 软件更新 | 在设置或应用菜单检查更新，可选择自动检查，更新包与清单均校验签名 |
 
@@ -50,8 +51,21 @@
 | Project Setup | 设置分辨率与帧率、建立媒体池模板及锁帧时间线、查看归档状态 |
 | Import YueLiu | 导入阅流导出的审片意见，筛选意见并跟踪处理状态 |
 | Multicam Tools | 角度命名与多机位合板操作 |
+| Minutes Roughcut | 将飞书妙记的划稿保留区间发送到 Resolve，生成粗剪时间线 |
 
-在「设置 → 插件管理」安装。安装后从 Resolve 的「工作区 → 脚本 → Utility」打开；菜单未刷新时重启 Resolve。Import YueLiu 需要在 Resolve 使用的 Python 环境中安装 `openpyxl`。
+在「设置 → 插件管理」安装或更新。安装后从 Resolve 的「工作区 → 脚本 → Utility」打开；菜单未刷新时重启 Resolve。Import YueLiu 需要在 Resolve 使用的 Python 环境中安装 `openpyxl`。Minutes Roughcut 还包含浏览器扩展，安装方式见下节。
+
+### Minutes Roughcut
+
+Minutes Roughcut 把飞书妙记页面上的划稿保留区间发送到 DaVinci Resolve，按区间生成粗剪时间线。它由 Resolve 脚本、Chrome 扩展和本地通信组件三部分组成。
+
+**安装**：在「设置 → 插件管理」安装 Minutes Roughcut，然后点「一键准备浏览器扩展」。ordina 会复制扩展文件夹路径、在 Chrome 中打开扩展程序页面，并在访达中选中该文件夹。接着在 Chrome 里开启「开发者模式」，选择「加载已解压的扩展程序」，按 ⌘⇧G 粘贴已复制的路径。Chrome 不允许第三方应用静默安装未上架的扩展，这两步无法省略。
+
+**使用**：打开飞书妙记页面，在扩展中点「发送到达芬奇」，把保留区间直接发送给已打开的 Resolve 项目；也可以导出 JSON，再从 Resolve 的「工作区 → 脚本 → Minutes Roughcut」导入。需要 macOS、Chrome 和 DaVinci Resolve Studio；浏览器直连时 Resolve 需已打开工程。
+
+**更新**：Minutes Roughcut 以签名插件包独立发布。插件管理会检查在线版本并直接更新，不需要重新安装 ordina。
+
+> 该插件为测试版。生成粗剪会重建时间线，可能无法保留部分特效、调色及链接，建议先在工程副本中试用并核对素材来源与时间起点。飞书页面或内部接口变化可能影响划稿提取。安装不会上传素材；被替换的旧文件会备份到 `~/Library/Application Support/Minutes Roughcut/backups`。
 
 ### 素材归档
 
