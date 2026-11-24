@@ -6,8 +6,6 @@
 
 **让项目从一开始就井然有序。**
 
-当前发布版本为 **1.9.2（30）**，Project Setup 为 **v2.3**。
-
 [下载安装包](https://github.com/BrOKenAG/ordina-releases/releases/latest) · [提交问题](https://github.com/BrOKenAG/ordina-releases/issues)
 
 ## 适合什么场景
