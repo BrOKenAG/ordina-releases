@@ -19,6 +19,7 @@ prepared = root/'.build/Build/Products/Release'/name
 shutil.copyfile(root/'Integrations/Project Setup.py', prepared/'Contents/Resources/Project Setup.py')
 for plugin in ('Import YueLiu.py', 'Multicam Tools.py'):
     shutil.copyfile(root/'Integrations/OptionalPlugins'/plugin, prepared/'Contents/Resources'/plugin)
+shutil.copytree(root/'Integrations/OptionalPlugins/Minutes Roughcut', prepared/'Contents/Resources/Minutes Roughcut', dirs_exist_ok=True)
 (prepared/'Contents/Resources/导入阅流.py').unlink(missing_ok=True)
 sparkle = prepared/'Contents/Frameworks/Sparkle.framework'
 assert sparkle.is_dir(), '缺少 Sparkle 更新组件'

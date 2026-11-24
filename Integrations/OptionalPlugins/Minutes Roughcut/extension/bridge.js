@@ -1,0 +1,3 @@
+let latest=null;
+document.addEventListener('minutes-roughcut-v1',e=>{try{const d=JSON.parse(e.detail);if(d.page===location.origin+location.pathname && Array.isArray(d.timeline))latest=d;}catch{}});
+chrome.runtime.onMessage.addListener((m,s,reply)=>{if(m.kind!=='read')return;document.dispatchEvent(new Event('minutes-roughcut-v1-request'));const video=document.querySelector('video,audio');reply({capture:latest?.page===location.origin+location.pathname?latest:null,title:document.title, duration_ms:Number.isFinite(video?.duration)?Math.round(video.duration*1000):null,highlightCount:document.querySelectorAll('.minutes-mark-background').length});});

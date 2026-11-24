@@ -10,8 +10,8 @@ assert d['CFBundleDisplayName']=='ordina'
 localized=plistlib.loads(subprocess.check_output(['plutil','-convert','xml1','-o','-',str(app/'Contents/Resources/zh-Hans.lproj/InfoPlist.strings')]))
 assert localized['CFBundleDisplayName']=='ordina'
 assert localized['CFBundleName']=='ordina'
-assert d['CFBundleShortVersionString']=='1.9.2'
-assert d['CFBundleVersion']=='30'
+assert d['CFBundleShortVersionString']=='1.9.3'
+assert d['CFBundleVersion']=='31'
 assert d['SUFeedURL']=='https://brokenag.github.io/ordina-releases/appcast.xml'
 assert d['SUPublicEDKey']=='90vua+GDSP8MSl6owCI/WSIkqBBuXO/AGw0ny4p67Bw='
 assert d['SUVerifyUpdateBeforeExtraction'] is True
@@ -28,6 +28,8 @@ for name in ('archive_worker.py','archive_service.py','archive_plan.py','media_a
     assert (resources/name).read_bytes()==(root/'Ordina'/name).read_bytes(), name+' 不是当前源码'
 for name in ('Import YueLiu.py','Multicam Tools.py'):
     assert (resources/name).read_bytes()==(root/'Integrations/OptionalPlugins'/name).read_bytes(), name+' 资源不符'
+assert (resources/'Minutes Roughcut/extension/manifest.json').is_file()
+assert (resources/'Minutes Roughcut/install.py').is_file()
 assert (resources/'Project Setup.py').read_bytes()==(root/'Integrations/Project Setup.py').read_bytes()
 assert not (resources/'导入阅流.py').exists()
 for removed in ('Helpers',):

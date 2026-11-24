@@ -44,6 +44,7 @@ private enum OptionalPluginWorker {
             case .outdated: status = .outdated
             }
             var result = OptionalPluginRowState(status: status)
+            if plugin == .minutes { return result }
             do {
                 let entry = try PluginUpdates.fetch(plugin)
                 let target = try OptionalPluginInstaller.scriptDirectory().appendingPathComponent(plugin.filename)
@@ -136,8 +137,8 @@ struct OptionalPluginsView: View {
             HStack(spacing: OrdinaTokens.space(12)) {
                 if inManager {
                     ResolvePluginLabel(title: plugin.name,
-                                       summary: plugin == .yueliu ? "导入阅流审片意见" : "批量命名机位，创建多机位片段",
-                                       symbol: plugin == .yueliu ? "text.bubble" : "video")
+                                       summary: plugin == .yueliu ? "导入阅流审片意见" : (plugin == .minutes ? "将飞书妙记划稿发送至 Resolve" : "批量命名机位，创建多机位片段"),
+                                       symbol: plugin == .yueliu ? "text.bubble" : (plugin == .minutes ? "text.badge.plus" : "video"))
                         .help(plugin.dependencyHint ?? plugin.name)
                 } else {
                     pluginName(plugin)
@@ -159,6 +160,9 @@ struct OptionalPluginsView: View {
                             if let directory = try? OptionalPluginInstaller.scriptDirectory() {
                                 NSWorkspace.shared.activateFileViewerSelecting([directory.appendingPathComponent(plugin.filename)])
                             }
+                        }
+                        if plugin == .minutes {
+                            Button("显示浏览器扩展") { showMinutesGuide() }
                         }
                         Button("重新安装") { performAction(plugin) }
                     } label: { Image(systemName: "ellipsis").frame(width: 28, height: 28) }
@@ -211,6 +215,20 @@ struct OptionalPluginsView: View {
             }.value
             guard requests[plugin] == request else { return }
             rows[plugin] = result
+            if plugin == .minutes && result.status == .current && result.error == nil { showMinutesGuide() }
+        }
+    }
+
+    private func showMinutesGuide() {
+        let alert = NSAlert()
+        alert.messageText = "加载 Chrome 扩展"
+        alert.informativeText = "在 Chrome 扩展程序页面开启开发者模式，选择“加载已解压的扩展程序”，然后选择打开的 extension 文件夹。"
+        alert.addButton(withTitle: "显示文件夹")
+        alert.addButton(withTitle: "稍后")
+        if alert.runModal() == .alertFirstButtonReturn {
+            let directory = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/Minutes Roughcut/extension")
+            NSWorkspace.shared.activateFileViewerSelecting([directory])
+            if let url = URL(string: "chrome://extensions") { NSWorkspace.shared.open(url) }
         }
     }
 

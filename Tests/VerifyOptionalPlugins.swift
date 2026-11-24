@@ -55,14 +55,14 @@ struct VerifyOptionalPlugins {
         try files.createDirectory(at: root, withIntermediateDirectories: true)
         defer { try? files.removeItem(at: root) }
 
-        try require(OptionalPlugin.allCases.map(\.id) == ["yueliu", "multicam"], "插件白名单不符")
+        try require(OptionalPlugin.allCases.map(\.id) == ["yueliu", "multicam", "minutes"], "插件白名单不符")
         try require(OptionalPlugin.yueliu.name == "Import YueLiu", "阅流显示名称不符")
         try require(OptionalPlugin.yueliu.filename == "Import YueLiu.py", "阅流文件名不符")
         try require(OptionalPlugin.multicam.filename == "Multicam Tools.py", "多机位文件名不符")
         try require(OptionalPlugin.yueliu.dependencyHint?.contains("openpyxl") == true, "缺少阅流依赖提示")
         try require(OptionalPlugin.multicam.dependencyHint == nil, "多机位不应有额外依赖提示")
 
-        for plugin in OptionalPlugin.allCases {
+        for plugin in [OptionalPlugin.yueliu, .multicam] {
             let home = root.appendingPathComponent(plugin.id)
             let source = root.appendingPathComponent(plugin.filename)
             let missingSource = root.appendingPathComponent("missing-" + plugin.filename)

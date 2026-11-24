@@ -3,6 +3,7 @@ import Foundation
 enum OptionalPlugin: String, CaseIterable, Identifiable, Sendable {
     case yueliu
     case multicam
+    case minutes
 
     var id: String { rawValue }
 
@@ -12,6 +13,7 @@ enum OptionalPlugin: String, CaseIterable, Identifiable, Sendable {
         switch self {
         case .yueliu: return "Import YueLiu"
         case .multicam: return "Multicam Tools"
+        case .minutes: return "Minutes Roughcut"
         }
     }
 
@@ -25,6 +27,7 @@ enum OptionalPlugin: String, CaseIterable, Identifiable, Sendable {
         switch self {
         case .yueliu: return "需在 Resolve 使用的 Python 环境中安装 openpyxl。"
         case .multicam: return nil
+        case .minutes: return "需要 Chrome 和 DaVinci Resolve Studio。"
         }
     }
 }
@@ -60,6 +63,19 @@ enum OptionalPluginInstaller {
     ) throws -> IntegrationInstaller.Status {
         lock.lock()
         defer { lock.unlock() }
+        if plugin == .minutes {
+            let base = Bundle.main.resourceURL?.appendingPathComponent("Minutes Roughcut")
+            guard let base, FileManager.default.fileExists(atPath: base.appendingPathComponent("install.py").path) else { throw Failure.sourceUnavailable(plugin.name) }
+            let pairs = [("Minutes Roughcut.py", utilityPath + "/Minutes Roughcut.py"), ("host.py", "Library/Application Support/Minutes Roughcut/host.py"), ("host.command", "Library/Application Support/Minutes Roughcut/host.command"), ("extension/manifest.json", "Library/Application Support/Minutes Roughcut/extension/manifest.json")]
+            for (resource, destination) in pairs {
+                let target = try checkedPath(home: home, relative: destination)
+                guard FileManager.default.fileExists(atPath: target.path) else { return .missing }
+                if try Data(contentsOf: target) != Data(contentsOf: base.appendingPathComponent(resource)) { return .outdated }
+            }
+            let manifest = try checkedPath(home: home, relative: "Library/Application Support/Google/Chrome/NativeMessagingHosts/com.minutesroughcut.bridge.json")
+            guard FileManager.default.fileExists(atPath: manifest.path) else { return .missing }
+            return .current
+        }
         let data = try sourceData(for: plugin, source: source)
         let target = try checkedPath(home: home, relative: utilityPath + "/" + plugin.filename)
         for filename in plugin.legacyFilenames {
@@ -78,6 +94,23 @@ enum OptionalPluginInstaller {
     ) throws {
         lock.lock()
         defer { lock.unlock() }
+        if plugin == .minutes {
+            guard let base = Bundle.main.resourceURL?.appendingPathComponent("Minutes Roughcut"), FileManager.default.fileExists(atPath: base.appendingPathComponent("install.py").path) else { throw Failure.sourceUnavailable(plugin.name) }
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: "/usr/bin/python3")
+            process.arguments = [base.appendingPathComponent("install.py").path]
+            var environment = ProcessInfo.processInfo.environment
+            environment["MINUTES_INSTALL_SOURCE"] = base.path
+            process.environment = environment
+            let pipe = Pipe()
+            process.standardOutput = pipe
+            process.standardError = pipe
+            try process.run()
+            let output = pipe.fileHandleForReading.readDataToEndOfFile()
+            process.waitUntilExit()
+            guard process.terminationStatus == 0 else { throw ResolveFailure(message: String(data: output, encoding: .utf8) ?? "安装失败") }
+            return
+        }
         // Load the full resource before creating folders or touching an install.
         let data = try sourceData(for: plugin, source: source)
         let files = FileManager.default

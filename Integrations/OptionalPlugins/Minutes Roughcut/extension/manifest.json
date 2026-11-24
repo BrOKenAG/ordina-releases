@@ -1,0 +1,47 @@
+{
+  "manifest_version": 3,
+  "name": "Minutes Roughcut",
+  "version": "0.1.0",
+  "description": "本地提取妙记划稿区间，生成 Resolve 粗剪指令",
+  "permissions": [
+    "activeTab",
+    "nativeMessaging"
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icons/logo.png",
+      "32": "icons/logo.png",
+      "48": "icons/logo.png",
+      "128": "icons/logo.png"
+    }
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://*.feishu.cn/minutes/*"
+      ],
+      "js": [
+        "capture.js"
+      ],
+      "run_at": "document_start",
+      "world": "MAIN"
+    },
+    {
+      "matches": [
+        "https://*.feishu.cn/minutes/*"
+      ],
+      "js": [
+        "bridge.js"
+      ],
+      "run_at": "document_start"
+    }
+  ],
+  "icons": {
+    "16": "icons/logo.png",
+    "32": "icons/logo.png",
+    "48": "icons/logo.png",
+    "128": "icons/logo.png"
+  },
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA9D9m0SyN4NRtR/C0RgITIKqmJVjlbWSx22r6zI6wYqWT1R5JA6+5kBcK9oh6F+hRV+BZylv5jlh7kdJfD9f05zqcw4ZgMxYx6c6EUG54lRZwV7xqPl8/plhO8msJIAK9m5fbT2L7faOnibgV5fAtqRttwkpq8HoN6q+cS7VHkakln9HpqwHfu8A1MutxGvvjtg0Qn9cgI6VqIkMV7EJol9zmC8KPHi3N/f5dQIMWOSE9zdobtHA2IzQbzi8c69b+16B50WrpVZvUQkbnXBBF/XfGuF7WGLuorp/BAQM+ZKj1aqlw+n8HCm8X36/ed8mNhR2nhCX/mf30dQfNTKueiwIDAQAB"
+}
