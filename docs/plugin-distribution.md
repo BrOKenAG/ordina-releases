@@ -79,7 +79,7 @@
 | --- | --- | --- |
 | 1.9.4 及更早 | `ordina-releases/plugins/manifest.json`（合并清单） | `build_feeds.py` 自动派生 |
 | 1.9.5 | 各插件仓库自己的 `manifest.json` | `build_feeds.py` 自动派生 |
-| 1.9.6 及以后 | `ordina-releases/registry.json` → 各插件仓库 `manifest.json` | `build_feeds.py` 自动派生 |
+| 1.9.6 及以后 | `ordina-releases/registry.json` → 各插件仓库 `manifest-v2.json`（`manifest.json` 保留兼容） | `build_feeds.py` 自动派生 |
 
 三份清单内容都来自同一份源，因此双写兼容不需要人工维护多份数据。1.9.5 的 Release、清单和二进制保持原样，不因本架构改动。
 
@@ -90,9 +90,9 @@
 1. 创建公开仓库 `ordina-plugin-<name>`，开启 Pages（`main` 根目录），提交 `.nojekyll`。
 2. 在 `plugins/registry.source.json` 增加一条，`published: false`，填好 `repository` / `feed` / `downloadPrefix` / `kind` / `asset` / `source`。
 3. 在 `Integrations/OptionalPlugins/` 放入源码并递增版本。
-4. 运行 `python3 scripts/publish_plugin.py <name> --repo-path <name>=<本地克隆路径>`。
+4. 先 `python3 scripts/publish_plugin.py <name> --dry-run` 预演，再 `python3 scripts/publish_plugin.py <name> --execute --lab-report docs/validation/lab-release.json` 真实发布。
 
-事务会自动完成：创建 Release → GATE 校验资产 → 更新源 → 派生四份签名清单 → 推送。客户端只支持预先定义的插件；新增插件仍需实现客户端入口，不能仅靠发布 registry 自动发现。
+发布由持久化跨仓库事务完成：创建 Release → GATE 校验资产 → 从唯一源派生全部签名产物 → 一次性写入主仓库与各插件仓库（`manifest.json` 兼容清单 + `manifest-v2.json` 新版清单）→ Pages 生效复核。中断后可用 `scripts/durable_journal.py --resume` 续发或 `--rollback` 回滚。客户端只支持预先定义的插件；新增插件仍需实现客户端入口，不能仅靠发布 registry 自动发现（这是阶段 B 的目标）。
 
 多文件插件（`kind: bundle`）打包为确定性 JSON 容器，客户端校验整体 SHA-256、逐文件路径白名单与体积，再用 App 自带的 `install.py` 安装；下载内容不含可执行安装逻辑。递增版本时同时更新 `plugin.json` 与 `extension/manifest.json` 中的版本号。
 

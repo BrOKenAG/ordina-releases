@@ -1,8 +1,8 @@
 # 构建与发布
 
-发布准备先校验每份兼容和新版插件清单及其资产，然后按顺序写入插件仓库、主仓库兼容清单与 registry。线上 registry 内容必须与预期一致，且完整检查通过；独立的客户端验证完成后才能执行 appcast 阶段。多仓库变更不是原子操作，任何失败都应先检查各仓库实际状态。
+发布准备先校验每份兼容和新版插件清单及其资产，然后由**持久化跨仓库事务**一次性写入插件仓库、主仓库兼容清单与 registry。线上 registry 内容必须与预期一致，且完整检查通过；独立的客户端验证完成后才能执行 appcast 阶段。跨仓库发布不是原子操作，事务记录会保存每个仓库的前后状态，中断后可续发或回滚。
 
-> **1.9.6 发布准备中：跨仓库插件推送和回滚推送已暂时停用。以下旧命令不应执行；先完成故障恢复验证。软件 appcast 须在真实客户端验证后单独发布。**
+> **阶段 A 已完成**：软件与插件正式发布入口已接入持久化事务；跨仓库断点续发、并发保护、Pages 延迟恢复和回滚已在私有测试仓库完成真实端到端验证。正式发布仍需显式 `--execute` 和有效的验证报告；软件 appcast 须在真实客户端验证后单独发布。`build_feeds.py --push` 与 `rollback_feeds.py --push` 等旧的直接推送入口保持停用。
 
 源码、安装包和更新清单共用 `BrOKenAG/ordina-releases` 仓库。GitHub Pages 从 `main` 分支根目录读取 `appcast.xml` 与 `registry.json`，下载文件位于 GitHub Releases。
 
@@ -62,44 +62,61 @@ python3 scripts/prepare_update.py \
 
 ## 发布事务（强制顺序）
 
-发布由 `scripts/release_transaction.py` 统一执行，软件与插件共用同一状态机。**硬不变式：签名清单只有在它引用的资产已被下载并验证之后才会被写入或推送。**
+发布由 `scripts/durable_release.py` 驱动，软件与插件共用同一状态机；`scripts/release_transaction.py` 提供计划数据结构、资产 GATE 与清单过渡规则等基础组件。**硬不变式：签名清单只有在它引用的资产已被下载并验证之后才会被写入或推送。**
+
+真实发布会把完整计划（资产哈希、每个仓库要写入的文件、事务前 HEAD）持久化到 `.transactions/<id>.json`，由 `scripts/durable_transaction.py` 执行。每个远端写入都是条件更新（HEAD 不匹配即失败），提交信息带事务标记，因此「远端已提交但响应丢失」也能被安全识别并续发。事务完成前必须读回线上 Pages 内容；Pages 尚未生效时事务保持未完成，重跑同一命令即可恢复。
 
 | 阶段 | 做什么 | 失败后果 |
 | --- | --- | --- |
-| `preflight` | 检查 main 分支、暂存区、与远端同步、GitHub 登录、签名工具 | 立即终止，无任何改动 |
+| `preflight` | 检查 main 分支、暂存区、与远端同步、GitHub 登录、签名工具、验证报告 | 立即终止，无任何改动 |
 | `asset` | 创建 Release 并上传资产；同版本已存在则校验字节一致后复用 | 立即终止，不写清单 |
 | `gate` | **GET 下载地址**：HTTP 200、文件大小、SHA-256；软件版另验 Ed25519 签名 | **立即终止，绝不写清单** |
-| `feeds` | 生成并写入签名清单（含 registry、兼容清单、各插件清单） | 可能部分写入，需回滚 |
-| `push` | 提交并推送 `main` | 同上 |
-| `postflight` | 运行 `check_feeds.py --remote`，等待 Pages 生效（最多 6 次重试） | 报告失败，人工介入 |
+| `feeds` | 持久化事务一次性写入所有仓库的签名清单、registry 与源；含资产复核、清单过渡校验、并发 HEAD 保护、Pages 生效复核 | 事务保持未完成，可续发或回滚 |
+| `push` | 检查点：确认事务状态为 `complete` 且每个仓库都记录了提交 | 报告失败，人工核对事务记录 |
+| `postflight` | 运行 `check_feeds.py --remote`，等待 Pages 生效 | 报告失败，人工介入 |
 
-软件发布：
+`feeds` 阶段内部每次恢复都会**重新下载并核对资产**，因此不会出现「资产已被删除但清单仍被推送」的情况。`.transactions/` 已加入 `.gitignore`，不进入仓库。
+
+分布式锁使用主仓库的 `refs/heads/ordina-transaction-lock` 引用，事务完成后标记为 `free`；它只用于发布互斥，不改变 `main` 分支的内容。生产后端只允许 `BrOKenAG/ordina-releases` 与 `BrOKenAG/ordina-plugin-*` 仓库、对应 github.com 下载地址与 `brokenag.github.io` Pages 地址，其余一律拒绝。
+
+软件发布（第一阶段只发布 registry 与插件清单）：
 
 ```sh
 python3 scripts/publish_app_release.py \
   --app dist/ordina.app \
   --archive dist/ordina-1.9.6-build.34.dmg \
   --feed dist/update/appcast.xml \
-  --notes-file dist/release-notes.txt
+  --notes-file dist/release-notes.txt \
+  --execute --lab-report docs/validation/lab-release.json
 ```
 
-软件发布分两阶段：先发布 registry，并等待线上内容一致且完整检查通过；真实客户端验证通过后，再以显式参数发布 appcast。跨仓库发布不是原子操作，失败时保留已发布的资产，检查当前线上状态后重试或按已知良好版本回滚。
+软件发布分两阶段：先发布 registry，并等待线上内容一致且完整检查通过；真实客户端验证通过后，再以 `--publish-appcast --validation-report <记录>` 单独执行第二个事务发布 appcast。两个事务各有独立的 journal，互不复用。
 
 插件发布：
 
 ```sh
 python3 scripts/publish_plugin.py minutes \
-  --repo-path minutes=../ordina-plugin-minutes \
-  --repo-path multicam=../ordina-plugin-multicam
+  --execute --lab-report docs/validation/lab-release.json
 ```
 
-两个入口都支持 `--dry-run`：走完整状态机但不产生任何网络或磁盘副作用，用于发布前演练。任一阶段失败会打印已完成阶段与建议操作，并以非零退出码结束。
+`--repo-path` 仅用于预演时生成本地副本；真实发布由事务直接写入各插件仓库，同时更新 `manifest.json`（兼容清单）与 `manifest-v2.json`（新版清单）。
+
+两个入口都支持 `--dry-run`：走**与真实发布完全相同的六阶段持久事务**，但使用内存后端和临时 journal，不产生网络或仓库副作用。真实发布必须显式 `--execute`，且要求 `docs/validation/lab-release.json` 中五项隔离仓库检查全部为 `pass`；缺任一条件即拒绝执行。任一阶段失败会打印已完成阶段、事务路径与建议操作，并以非零退出码结束。
+
+事务恢复与回滚（不需要重复提供发布参数，直接从 journal 重建后端）：
+
+```sh
+python3 scripts/durable_journal.py --status .transactions/<id>.json
+python3 scripts/durable_journal.py --resume .transactions/<id>.json --postflight
+python3 scripts/durable_journal.py --rollback .transactions/<id>.json
+```
 
 **绝不要**把「上传 DMG/插件资产」和「推送清单」拆成两条独立命令手工执行。1.9.3 与 1.9.5 发布时都曾因这种拆分导致清单短暂指向不存在的 Release：前者是清单漏推，客户端收不到更新；后者是 `gh release create` 网络报错但清单仍被推送。
 
 ## 发布前检查
 
 ```sh
+python3 scripts/verify_lab_release.py --execute
 python3 scripts/build_feeds.py --check \
   --repo-path minutes=../ordina-plugin-minutes \
   --repo-path multicam=../ordina-plugin-multicam
@@ -108,6 +125,7 @@ python3 scripts/check_feeds.py --preflight \
   --repo-path multicam=../ordina-plugin-multicam
 ```
 
+- `verify_lab_release.py --execute` 在两个**私有测试仓库**真实演练多文件跨仓库事务、远端提交后断线续发、并发提交拒绝、安全回滚，以及本地 HTTP 服务模拟的 Pages 延迟恢复。通过后写入 `docs/validation/lab-release.json`；正式发布入口会拒绝没有这份报告的执行。脚本只访问 `ordina-release-lab-*` 仓库，不修改正式仓库。
 - `build_feeds.py --check` 确认所有现有签名清单都能由唯一源 `plugins/registry.source.json` 逐字节派生，防止有人手工改过清单。
 - `check_feeds.py --preflight` 验签本地清单、检查 registry 结构，并用**与客户端完全相同的规则**校验每个下载地址（github.com HTTPS、registry 下发的前缀、扩展名、版本与哈希格式）。预演模式不下载资产，因为此时资产尚未上传。
 
@@ -127,8 +145,10 @@ python3 scripts/check_feeds.py --remote
 | --- | --- |
 | `preflight` / `asset` 失败 | 修复后重跑同一命令，无副作用需清理 |
 | `gate` 失败 | 清单未被写入；检查 Release 资产后重跑同一命令（幂等） |
-| `feeds` / `push` 中途失败 | 先运行 `check_feeds.py --remote` 确认线上状态，再决定重试或回滚 |
-| `postflight` 因 Pages 未生效失败 | 事务内置重试；也可等几分钟后手动重跑体检 |
+| `feeds` / `push` 中途失败 | 事务记录保持未完成；先 `durable_journal.py --status` 查看各仓库前后 HEAD，再用 `--resume` 续发或 `--rollback` 回滚 |
+| 远端提交成功但响应丢失 | 事务标记 + 条件写可安全识别；重跑同一命令或 `--resume` 即可，不会重复写入 |
+| 其他发布者并发提交 | 事务前快照与 HEAD 条件写会拒绝覆盖，事务安全失败并保留对方内容 |
+| `postflight` 因 Pages 未生效失败 | 生产后端内置 4 次重试；仍失败则事务保持未完成，等 Pages 生效后 `--resume --postflight` |
 | 同版本资产已存在且字节一致 | 自动复用，不重复创建 Release |
 | 同版本资产已存在但内容不同 | 拒绝发布，递增版本号 |
 | 误删了清单仍引用的 Release | 重建同名 Release 并上传**字节完全一致**的资产；源码未变时 `build_bundle()` 是确定性的 |
@@ -140,11 +160,14 @@ python3 scripts/check_feeds.py --remote
 ## 回滚
 
 ```sh
-python3 scripts/rollback_feeds.py --to HEAD~1 --dry-run
-python3 scripts/rollback_feeds.py --to HEAD~1 --push
+python3 scripts/durable_journal.py --status .transactions/<id>.json
+python3 scripts/durable_journal.py --rollback .transactions/<id>.json
+python3 scripts/check_feeds.py --remote
 ```
 
-它把 `appcast.xml`、`plugins/manifest.json`、`registry.json` 恢复到已知良好的提交。**绝不删除 Release**：删除旧清单仍引用的资产会给缓存了该清单的客户端造成死链。回滚后运行 `check_feeds.py --remote` 复核；各插件仓库的 `manifest.json` 需单独恢复，或用 `build_feeds.py --push` 从源重新生成。
+事务回滚会把**所有参与仓库**恢复到记录中的事务前字节，并且只在 HEAD 与记录一致时执行；出现他人提交或已回滚的远端变化会直接拒绝，不会覆盖。回滚后运行 `check_feeds.py --remote` 复核。
+
+`rollback_feeds.py --dry-run` 仍可用于对照历史提交，但其 `--push` 入口保持停用，不再作为跨仓库回滚手段。**绝不删除 Release**：删除旧清单仍引用的资产会给缓存了该清单的客户端造成死链。
 
 ## 兼容期
 
@@ -154,7 +177,9 @@ python3 scripts/rollback_feeds.py --to HEAD~1 --push
 
 插件分发的仓库拓扑、签名信任链与新增插件流程见 [插件分发架构](plugin-distribution.md)。
 
-## 1.9.6 分阶段恢复检查
+## 1.9.6 分阶段恢复检查（历史记录）
+
+以下是 1.9.6 准备期的手工恢复指引，现已由持久化事务覆盖，保留作事故排查参考。
 
 恢复前先暂停其他发布。记录 `git status -sb`、`git log --oneline origin/main..HEAD`，再只读检查各仓库 `manifest.json`、`manifest-v2.json`、主仓库兼容清单与 registry 的线上内容。不要删除 Release 或覆盖存在未知差异的清单。跨仓库并非原子操作：某个插件仓库成功后，其他仓库仍可能失败。
 
@@ -164,3 +189,12 @@ python3 scripts/rollback_feeds.py --to HEAD~1 --push
 - 需要回滚：先用 `rollback_feeds.py --to <已知良好提交> --dry-run` 核对主仓库文件；当前自动推送回滚已禁用，插件仓库需逐一审查签名、引用和实际线上状态后制定恢复操作。禁止删除仍可能被旧清单引用的 Release。
 
 真实客户端验证完成前不执行 `--publish-appcast`。软件构建须由操作者在 macOS 原生终端运行，不使用单独编译的可执行文件或旧 App 替换。
+
+## 阶段 A 完成状态
+
+- 软件与插件正式发布入口均已接入 `durable_release.py` + 持久化 journal；`--dry-run` 仍走零副作用预演路径。
+- 事务记录覆盖全部参与仓库、资产哈希与前后 HEAD；支持 `--resume` 续发、`--rollback` 回滚、`--status` 只读查看。
+- 生产后端在写入前复核资产 GET/哈希/Ed25519、签名清单引用、清单过渡规则与白名单 URL；完成前读回 Pages 内容并内置重试。
+- `scripts/verify_lab_release.py --execute` 在私有测试仓库完成五项真实端到端验证；报告 `docs/validation/lab-release.json` 是正式发布的前置条件。
+- `build_feeds.py --push`、`rollback_feeds.py --push` 等旧直接推送入口仍停用；标准 Xcode 构建流程未改动，未引入 CI Secrets。
+- 阶段 B（动态插件协议与插件中心）尚未开始；新增插件仍需实现客户端入口，不能仅靠发布 registry 自动发现。阶段划分与验收目标见仓库根目录的 [阶段A进度与阶段B方案.md](../阶段A进度与阶段B方案.md)，其中阶段 A 的「尚未完成」项现均已落地。

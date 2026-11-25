@@ -14,6 +14,7 @@ class MemoryRemote:
         self.values = {'one':b'old-one', 'two':b'old-two'}
         self.lock = None
         self.asset_valid = True
+        self.online = True
         self.fail_repo = None
         self.markers = {}
     def acquire(self, token):
@@ -24,6 +25,8 @@ class MemoryRemote:
         self.lock = None
     def verify_assets(self, plan):
         if not self.asset_valid: raise RuntimeError('asset unavailable')
+    def verify_online(self, plan):
+        if not self.online: raise RuntimeError('pages unavailable')
     def read(self, repo): return self.heads[repo], self.values[repo]
     def is_transaction_commit(self, repo, head, previous, token):
         return self.markers.get((repo,head)) == (previous,token)
@@ -52,11 +55,34 @@ class DurableTests(unittest.TestCase):
         self.assertEqual(self.remote.values['two'], b'new-two')
         self.assertIsNone(self.remote.lock)
         self.assertEqual(json.loads(self.path.read_text())['status'],'complete')
+    def test_resume_reads_exact_persisted_plan(self):
+        self.remote.fail_repo = 'two'
+        with self.assertRaises(ConnectionError): tx.publish(self.plan, self.path, self.remote)
+        tx.resume(self.path, self.remote)
+        self.assertEqual(self.remote.values['two'], b'new-two')
+        self.assertIsNone(self.remote.lock)
+
     def test_assets_fail_before_any_feed_is_changed(self):
         self.remote.asset_valid=False
         with self.assertRaises(RuntimeError): tx.publish(self.plan,self.path,self.remote)
         self.assertEqual(self.remote.values['one'],b'old-one')
         self.assertEqual(self.remote.values['two'],b'old-two')
+    def test_missing_asset_during_resume_blocks_remaining_feed(self):
+        self.remote.fail_repo = 'two'
+        with self.assertRaises(ConnectionError): tx.publish(self.plan, self.path, self.remote)
+        self.remote.asset_valid = False
+        with self.assertRaises(RuntimeError): tx.publish(self.plan, self.path, self.remote)
+        self.assertEqual(self.remote.values['two'], b'old-two')
+
+    def test_pages_failure_keeps_journal_pending_and_resume_verifies(self):
+        self.remote.online = False
+        with self.assertRaises(RuntimeError): tx.publish(self.plan, self.path, self.remote)
+        self.assertNotEqual(json.loads(self.path.read_text())['status'], 'complete')
+        self.remote.online = True
+        tx.publish(self.plan, self.path, self.remote)
+        self.assertEqual(json.loads(self.path.read_text())['status'], 'complete')
+        self.assertIsNone(self.remote.lock)
+
     def test_plan_change_never_reuses_journal(self):
         self.remote.fail_repo='two'
         with self.assertRaises(ConnectionError): tx.publish(self.plan,self.path,self.remote)
@@ -129,6 +155,39 @@ class DurableTests(unittest.TestCase):
         bad = {'id': 'free', 'feeds': {'one': 'bad'}}
         with self.assertRaises(ValueError): tx.publish(bad,self.path,self.remote)
         self.assertIsNone(self.remote.lock)
+
+    def test_same_transaction_id_cannot_claim_lock_for_different_plan(self):
+        self.remote.fail_repo = 'two'
+        with self.assertRaises(ConnectionError): tx.publish(self.plan, self.path, self.remote)
+        other = {'id': self.plan['id'], 'feeds': {'one': 'different', 'two': 'other'}}
+        with self.assertRaises(RuntimeError): tx.publish(other, self.path.parent/'other.json', self.remote)
+        self.assertEqual(self.remote.values['one'], b'new-one')
+
+    def test_duplicate_plan_with_separate_journal_cannot_reuse_lock(self):
+        self.remote.fail_repo = 'two'
+        with self.assertRaises(ConnectionError): tx.publish(self.plan, self.path, self.remote)
+        with self.assertRaises(RuntimeError): tx.publish(self.plan, self.path.parent/'duplicate.json', self.remote)
+        self.assertEqual(self.remote.values['two'], b'old-two')
+
+    def test_other_repository_changes_mid_publish_are_not_overwritten(self):
+        original = self.remote.write
+        def concurrent(repo, expected, data, token):
+            result = original(repo, expected, data, token)
+            if repo == 'one':
+                self.remote.heads['two'] = 'foreign-head'
+                self.remote.values['two'] = b'foreign-content'
+            return result
+        self.remote.write = concurrent
+        with self.assertRaises(RuntimeError): tx.publish(self.plan, self.path, self.remote)
+        self.assertEqual(self.remote.values['two'], b'foreign-content')
+
+    def test_stale_prepared_head_rejected_before_any_writes(self):
+        plan = dict(self.plan, expected_heads={'one':'h0', 'two':'h0'})
+        self.remote.heads['two']='foreign-head'
+        self.remote.values['two']=b'foreign-content'
+        with self.assertRaises(RuntimeError): tx.publish(plan,self.path,self.remote)
+        self.assertEqual(self.remote.values['one'],b'old-one')
+        self.assertEqual(self.remote.values['two'],b'foreign-content')
 
     def test_concurrent_lock_rejected(self):
         self.remote.lock='other'

@@ -11,6 +11,7 @@ import hashlib
 import json
 import os
 import re
+import secrets
 import tempfile
 from pathlib import Path
 
@@ -59,7 +60,7 @@ def _load(plan, path):
         journal = json.loads(path.read_text(encoding='utf-8'))
         if journal.get('plan_hash') != _digest(plan): raise ValueError('事务计划与记录不一致')
         return journal
-    journal = {'format': 1, 'plan_hash': _digest(plan), 'token': plan['id'],
+    journal = {'format': 1, 'plan': plan, 'plan_hash': _digest(plan), 'token': plan['id'] + '_' + _digest(plan)[:16] + '_' + secrets.token_hex(16),
                'status': 'preparing', 'repositories': {}}
     _save(path, journal)
     return journal
@@ -82,15 +83,26 @@ def publish(plan, path, remote):
         # Recheck every time, including after a crash; no feed changes before
         # every referenced release asset is actually available and verified.
         remote.verify_assets(plan)
+        # Capture every repository before the first write. Otherwise a foreign
+        # commit to a later repository could be mistaken for our baseline.
+        if not journal['repositories']:
+            snapshot = {}
+            for repo, value in sorted(plan['feeds'].items()):
+                head, data = remote.read(repo)
+                prepared = plan.get('expected_heads', {}).get(repo)
+                if prepared is not None and head != prepared:
+                    raise RuntimeError('远端 HEAD 已变化，请重新准备事务')
+                snapshot[repo] = {'before_head': head, 'before': _encode(data),
+                                  'after': _encode(value.encode('utf-8')), 'after_head': None}
+            journal['repositories'] = snapshot
+            journal['status'] = 'publishing'
+            _save(path, journal)
+        elif set(journal['repositories']) != set(plan['feeds']):
+            raise RuntimeError('事务快照不完整，停止恢复')
         for repo, value in sorted(plan['feeds'].items()):
             expected = value.encode('utf-8')
-            record = journal['repositories'].get(repo)
+            record = journal['repositories'][repo]
             head, data = remote.read(repo)
-            if record is None:
-                record = {'before_head': head, 'before': _encode(data), 'after': _encode(expected), 'after_head': None}
-                journal['repositories'][repo] = record
-                journal['status'] = 'publishing'
-                _save(path, journal)
             if _decode(record['after']) != expected: raise ValueError('事务目标变化')
             if record['after_head'] is not None:
                 if head != record['after_head'] or data != expected: raise RuntimeError('远端已变化，停止恢复')
@@ -101,9 +113,20 @@ def publish(plan, path, remote):
                 raise RuntimeError('远端状态无法安全恢复')
             record['after_head'] = head
             _save(path, journal)
+        # Completion requires reading the externally served state, not merely
+        # accepting a successful API write. A failure remains resumable.
+        remote.verify_online(plan)
         journal['status'] = 'complete'
         _save(path, journal)
         remote.release(token)
+
+
+def resume(path, remote):
+    journal = json.loads(Path(path).read_text(encoding='utf-8'))
+    plan = journal.get('plan')
+    if not isinstance(plan, dict) or journal.get('plan_hash') != _digest(plan):
+        raise ValueError('事务记录缺少有效的发布计划')
+    publish(plan, path, remote)
 
 
 def rollback(path, remote):

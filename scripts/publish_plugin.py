@@ -1,13 +1,15 @@
 #!/usr/bin/env python3
-"""Publish one plugin release as a verified transaction.
+"""Publish one plugin release as a verified, resumable transaction.
 
-Order is fixed and enforced by release_transaction.execute():
+Order is fixed and enforced by the durable release driver:
+
     preflight -> create/upload Release -> GATE (GET 200 + size + SHA-256)
-              -> write signed feeds -> push -> postflight
+              -> durable cross-repository feed transaction -> postflight
 
 The registry source, the signed registry, the legacy combined feed and every
 per-plugin feed are all derived from ONE metadata source by build_feeds.py.
-None of them is maintained by hand.
+None of them is maintained by hand. Resume and rollback are handled by
+scripts/durable_journal.py.
 """
 import argparse
 import base64
@@ -18,10 +20,10 @@ import sys
 import tempfile
 from pathlib import Path
 
+import durable_release
 from build_feeds import entry, generate, load_source
 from release_transaction import (ROOT, Asset, DryRunGateway, FeedTarget,
-                                 LocalGateway, Plan, ReleaseError,
-                                 describe_failure, execute)
+                                 LocalGateway, Plan, ReleaseError)
 
 SOURCE_PATH = ROOT / 'plugins' / 'registry.source.json'
 VERSION_RE = re.compile(r'^[0-9]+(?:\.[0-9]+){1,3}$')
@@ -101,15 +103,23 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('plugin', choices=sorted(plugins))
     parser.add_argument('--repo-path', action='append', default=[], metavar='NAME=PATH',
-                        help='插件本地克隆路径，可重复；用于同步写入 manifest.json')
+                        help='插件本地克隆路径，可重复；仅用于预演时生成本地副本')
     parser.add_argument('--dry-run', action='store_true',
                         help='走完整流程但不产生任何网络或磁盘副作用')
+    parser.add_argument('--execute', action='store_true', help='执行真实持久化发布事务')
     parser.add_argument('--timeout', type=int, default=300)
+    parser.add_argument('--journal-dir', type=Path,
+                        default=durable_release.TRANSACTIONS)
+    parser.add_argument('--lab-report', type=Path,
+                        default=durable_release.LAB_REPORT,
+                        help='隔离仓库端到端验证报告')
     args = parser.parse_args()
 
     try:
-        if not args.dry_run:
-            raise ValueError('跨仓库插件发布暂不可用；需先完成部分失败恢复验证。')
+        if not args.dry_run and not args.execute:
+            raise ValueError('正式发布需显式 --execute；预演请使用 --dry-run。')
+        if args.execute and not durable_release.lab_report_valid(args.lab_report):
+            raise ValueError('缺少有效的隔离仓库验证报告（--lab-report），已停止发布。')
         name = args.plugin
         meta = plugins[name]
         source, data, ver = build_asset(meta)
@@ -144,15 +154,23 @@ def main():
                        path=ROOT / 'plugins' / 'manifest.json'),
             FeedTarget('source', source_bytes, path=SOURCE_PATH),
         ]
+        # Each plugin repository keeps two feeds: the new format and the
+        # frozen compatibility feed older clients still read.
         for label, (doc, envelope_data) in generated.items():
-            if not label.startswith('plugin:'):
+            if label.startswith('plugin:'):
+                plugin_name = label.split(':', 1)[1]
+                remote = 'manifest-v2.json'
+            elif label.startswith('compat-plugin:'):
+                plugin_name = label.split(':', 1)[1]
+                remote = 'manifest.json'
+            else:
                 continue
-            plugin_name = label.split(':', 1)[1]
             clone = repo_paths.get(plugin_name)
             feeds.append(FeedTarget(
                 label, envelope_data,
                 path=clone / 'manifest.json' if clone else None,
                 repository=document['plugins'][plugin_name]['repository'],
+                remote_path=remote,
             ))
 
         plan = Plan(
@@ -171,17 +189,27 @@ def main():
 
         with tempfile.TemporaryDirectory(prefix='ordina-plugin-release-') as temporary:
             tmp = Path(temporary)
-            gateway = (DryRunGateway(data) if args.dry_run else LocalGateway())
-            result = execute(plan, gateway, tmp, args.timeout)
-
-        if args.dry_run:
-            print(f'预演通过：{plan.label} → {plan.repository}')
-            print('阶段：' + ' → '.join(result['stages']))
-            print('清单：' + ', '.join(f.label for f in feeds))
-        else:
+            journal_dir = tmp / 'journals' if args.dry_run else args.journal_dir
+            prepared = durable_release.prepare(
+                plan, f'plugin-{name}-v{ver}', journal_dir=journal_dir)
+            if args.dry_run:
+                backend = durable_release.DryRunBackend(prepared.plan['feeds'])
+                gateway = DryRunGateway(data)
+            else:
+                backend = durable_release.production_backend(prepared, plan)
+                gateway = LocalGateway()
+            result = durable_release.execute(plan, gateway, backend,
+                                             prepared, tmp, args.timeout)
+            if args.dry_run:
+                print(f'预演通过：{plan.label} → {plan.repository}')
+                print('阶段：' + ' → '.join(result['stages']))
+                print('清单：' + ', '.join(f.label for f in feeds))
+                return
             print(f'已发布 {plan.label}（{result["asset"]}）到 {plan.repository}')
+            print('事务记录：' + result['journal'])
     except ReleaseError as error:
-        sys.exit(describe_failure(error))
+        journal = prepared.journal if 'prepared' in locals() else None
+        sys.exit(durable_release.describe(error, journal))
     except (ValueError, OSError) as error:
         sys.exit(f'发布失败：{error}')
 

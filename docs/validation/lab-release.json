@@ -1,0 +1,17 @@
+{
+  "format": 1,
+  "generated_at": "2026-11-25T06:29:38.027336+00:00",
+  "repositories": [
+    "BrOKenAG/ordina-release-lab-20261124-main",
+    "BrOKenAG/ordina-release-lab-20261124-plugin"
+  ],
+  "checks": {
+    "multi_file_transaction": "pass",
+    "rollback": "pass",
+    "lost_response_resume": "pass",
+    "pages_delay_resume": "pass",
+    "foreign_head_rejected": "pass"
+  },
+  "passed": true,
+  "notes": "私有测试仓库真实端到端验证；本地 HTTP 服务模拟 Pages 最终一致性；正式仓库未修改。"
+}
