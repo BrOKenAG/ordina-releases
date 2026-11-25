@@ -161,6 +161,14 @@ def main():
     thread.start()
     results = {}
 
+    # An interrupted run can leave the private test repositories' lock ref held.
+    # Clean it up BEFORE the checks as well as in `finally`, otherwise the next
+    # invocation fails on `multi_file_transaction` with "release lock is held".
+    try:
+        release_stale_lock()
+    except Exception as error:                                  # noqa: BLE001
+        print('启动前锁清理失败：' + str(error), flush=True)
+
     try:
         with tempfile.TemporaryDirectory(prefix='ordina-lab-verify-') as temporary:
             directory = Path(temporary)

@@ -10,6 +10,7 @@ A lab backend refuses every production repository: only ``BrOKenAG/ordina-*-lab*
 shapes are accepted, and the whole module is absent from the production tool.
 """
 import base64
+import errno
 import hashlib
 import json
 import os
@@ -29,6 +30,19 @@ class LabError(RuntimeError):
 
 def _fail(message):
     raise LabError(message)
+
+
+def _enospc(stage):
+    """Inject a real ENOSPC OSError at one lab write site.
+
+    ``ORDINA_DEV_LAB_ENOSPC`` selects the stage: ``asset`` (release asset
+    upload), ``feed`` (remote feed write) or ``journal`` (transaction journal
+    save). The exception is the exact errno a full disk produces, so the
+    production error path is exercised without actually filling a volume.
+    """
+    if os.environ.get('ORDINA_DEV_LAB_ENOSPC') == stage:
+        raise OSError(errno.ENOSPC, 'No space left on device',
+                      'ORDINA_DEV_LAB_ENOSPC=' + stage)
 
 
 class LabBackend:
@@ -64,6 +78,7 @@ class LabBackend:
         if limit is not None and self.writes >= int(limit):
             _fail('injected write failure')
         self.writes += 1
+        _enospc('feed')
         path = self._blob(repo)
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(data)
@@ -180,6 +195,9 @@ class LabGateway:
         return any((self.root / 'assets' / repository / tag).glob('*'))
 
     def create_release(self, repository, tag, asset_path, title, notes, latest=False):
+        # Fail before creating any directory: a full disk must not leave a
+        # half-written release behind.
+        _enospc('asset')
         target = self.root / 'assets' / repository / tag / Path(asset_path).name
         target.parent.mkdir(parents=True, exist_ok=True)
         data = Path(asset_path).read_bytes()

@@ -56,6 +56,25 @@ struct VerifyDeveloperCenter {
         try require(DevProtocol.minimumToolClient == "1.10.0",
                     "minimum tool client version changed")
 
+        // The tool manifest trust anchor is pinned in a release build. A lab
+        // build may substitute an isolated test key, but only while lab mode is
+        // active, so an acceptance run never needs the production release key.
+        let isolatedKey = Data(repeating: 0xAB, count: 32)
+        setenv("ORDINA_DEV_MANIFEST_PUBLIC_KEY", isolatedKey.base64EncodedString(), 1)
+        #if DEBUG || ORDINA_LAB
+        setenv("ORDINA_DEV_LAB", "1", 1)
+        try require(DevBridge.isLab, "lab mode not active")
+        try require(DevBridge.toolManifestPublicKey == isolatedKey,
+                    "lab manifest key was not used")
+        unsetenv("ORDINA_DEV_LAB")
+        #else
+        try require(DevBridge.isLab == false, "release build reports lab mode")
+        #endif
+        try require(DevBridge.toolManifestPublicKey
+                        == PluginEnvironment.productionPublicKey,
+                    "production key not restored outside lab mode")
+        unsetenv("ORDINA_DEV_MANIFEST_PUBLIC_KEY")
+
         // Journals are readable without the tool: that is what makes recovery
         // possible after a crash or a broken update.
         try manager.createDirectory(at: DeveloperPaths.journals, withIntermediateDirectories: true)

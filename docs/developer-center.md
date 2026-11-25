@@ -175,6 +175,8 @@ python3 scripts/verify.py --no-acceptance    # 跳过端到端，只跑回归
 
 ## 人工验收清单（必须在本地 Xcode 构建的 App 上完成）
 
+> **优先用简版清单**：`python3 scripts/prepare_app_acceptance.py` 会生成 `dist/app-acceptance/README.md`，把环境准备压缩成 4 条命令、把 App 内操作压缩成 8 步，且全部数据隔离在临时 HOME 里，不接触正式生产资源。下面这份是覆盖更广的完整清单，供需要逐项核对时使用。注意隔离验收必须启动 **Debug** 产物，Release 构建会编译剔除 lab 开关并回落到生产地址。
+
 自动验收覆盖了引擎、协议、事务与客户端逻辑，但**真实 App 构建与人工交互必须在本机 Xcode 里做**（当前会话的 `xcodebuild` 受 `sandbox-exec: Operation not permitted` 限制，无法解析 SwiftPM 依赖）：
 
 1. Xcode 里 Debug、Release 各构建一次，确认无警告级错误。

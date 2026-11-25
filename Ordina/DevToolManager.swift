@@ -172,7 +172,7 @@ enum DevToolManager {
         let payload: Data
         do {
             payload = try PluginProtocol.verifiedPayload(
-                data, publicKey: PluginEnvironment.productionPublicKey)
+                data, publicKey: DevBridge.toolManifestPublicKey)
         } catch {
             throw DevToolError.manifest("发布工具清单签名无效。")
         }

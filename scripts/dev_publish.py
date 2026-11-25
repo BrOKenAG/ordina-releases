@@ -657,9 +657,16 @@ def command_doctor(options):
     requirement('credential', credential_state['valid'],
                 '开发者授权有效' if credential_state['valid']
                 else credential_state.get('message', '开发者授权无效'))
-    gh = subprocess.run(['gh', 'auth', 'status'], capture_output=True, text=True)
-    requirement('github', gh.returncode == 0,
-                'GitHub 授权可用' if gh.returncode == 0 else 'gh 未授权')
+    # A standalone deployment may not have gh on PATH. That is a diagnostic
+    # result, not a crash: doctor must still return a structured report.
+    try:
+        gh = subprocess.run(['gh', 'auth', 'status'], capture_output=True,
+                            text=True, timeout=15)
+        github_ok = gh.returncode == 0
+    except (OSError, subprocess.SubprocessError):
+        github_ok = False
+    requirement('github', github_ok,
+                'GitHub 授权可用' if github_ok else 'gh 未安装或未授权')
     journals = all_journals(journal_directory(root, options.journal_dir))
     pending = [item for item in journals if item['resumable']]
     ok({'tool': TOOL, 'version': TOOL_VERSION, 'protocol': PROTOCOL,

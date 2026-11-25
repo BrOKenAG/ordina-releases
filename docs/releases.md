@@ -38,7 +38,7 @@ python3 scripts/verify.py
 python3 scripts/build_app.py --output dist/ordina.app
 python3 Tests/verify_app.py dist/ordina.app
 python3 -m pip install --target .build/dmg-libs -r requirements-build.txt
-python3 scripts/build_distribution.py --app dist/ordina.app --output dist --release-label build.34
+python3 scripts/build_distribution.py --app dist/ordina.app --output dist --release-label build.36
 ```
 
 DMG 打包依赖 Pillow 的编译扩展，需用与安装依赖时相同的 Python 解释器运行（例如 `/usr/local/bin/python3`）。
@@ -51,7 +51,7 @@ DMG 打包依赖 Pillow 的编译扩展，需用与安装依赖时相同的 Pyth
 curl --fail --location https://brokenag.github.io/ordina-releases/appcast.xml --output dist/previous-appcast.xml
 python3 scripts/prepare_update.py \
   --app dist/ordina.app \
-  --archive dist/ordina-1.9.6-build.34.dmg \
+  --archive dist/ordina-1.10.0-build.36.dmg \
   --output dist/update \
   --previous-feed dist/previous-appcast.xml
 ```
@@ -84,7 +84,7 @@ python3 scripts/prepare_update.py \
 ```sh
 python3 scripts/publish_app_release.py \
   --app dist/ordina.app \
-  --archive dist/ordina-1.9.6-build.34.dmg \
+  --archive dist/ordina-1.10.0-build.36.dmg \
   --feed dist/update/appcast.xml \
   --notes-file dist/release-notes.txt \
   --execute --lab-report docs/validation/lab-release.json
@@ -209,7 +209,7 @@ python3 scripts/check_feeds.py --remote
 - 验收：`scripts/verify_plugin_protocol.py` 编译一份快照客户端，在 loopback 隔离环境发布客户端源码完全不认识的新插件 ID，完成发现/展示/安装/更新/卸载/回滚，并覆盖 Registry 不可用、签名错误、资产损坏、版本不兼容、安装中断；报告 [validation/plugin-protocol.json](validation/plugin-protocol.json) 全项 `pass`。
 - 新插件上线流程（无需重编译客户端）与新协议字段说明见 [plugin-distribution.md](plugin-distribution.md)。
 
-## 阶段 C 完成状态
+## 阶段 C 实现状态（代码与自动化验收完成，真实 App 验收待确认）
 
 - **三条独立通道**：软件（`appcast.xml` + Sparkle）、插件（`registry.json` + 各插件 `manifest-v2.json`）、发布工具（`dev-tool/manifest.json` + `ordina-publisher-<版本>.pyz`）。三者版本号、签名清单、目录与回滚流程互不影响。
 - **开发者中心**（默认隐藏在设置页的「测试选项」里）：拖入 ZIP → 自动识别 → 本地测试 → 填写说明 → 预览（含指纹）→ 发布，复用阶段 A 的六阶段持久事务；另有事务管理、继续、回滚、工具更新与工具回滚。
@@ -217,26 +217,71 @@ python3 scripts/check_feeds.py --remote
 - **凭据只走钥匙串**（`ordina-dev-publisher`），签名文档声明范围与仓库白名单，由引擎自己校验；仓库、日志、journal 与 JSON 输出都不含凭据内容。
 - **安全收口**：ZIP 适配层在写盘前拒绝穿越/符号链接/ZIP bomb/重复路径；预览指纹防止预览后偷换；参数化 GitHub API 防止仓库名注入；lab 注入改为编译期 `#if DEBUG || ORDINA_LAB`，Release 构建无法通过环境变量切换 Registry 或公钥；生产工具包不含隔离后端与实验室签名器。
 - **工具更新独立**：先验签清单、再验 SHA-256/大小、下载后做健康检查（`hello.version` 必须等于清单版本），失败保留旧版本；存在未完成事务时拒绝替换引擎。
-- 验收：`python3 scripts/verify_developer_center.py` 26 项全 `pass`，报告 [validation/developer-center.json](validation/developer-center.json)。使用说明与人工验收清单见 [developer-center.md](developer-center.md)。
+- 验收：`python3 scripts/verify_developer_center.py` 27 项全 `pass`，报告 [validation/developer-center.json](validation/developer-center.json)。使用说明与人工验收清单见 [developer-center.md](developer-center.md)。
 
-### 上线命令清单（只准备，未执行）
+### 本次收尾已解决项（自动化可复验）
+
+- `sparkle_tools.ROOT` 改为用户级稳定缓存目录（`~/Library/Application Support/ordina/Publisher/tools/sparkle-2.10.1`），不再由 `__file__` 或 `ORDINA_DEV_REPO` 推导；`ORDINA_SPARKLE_TOOLS` 只是显式部署覆盖。独立部署验收 `docs/validation/standalone-tool.json`（11 项全 pass）在**没有源码树、没有 lab 变量**的最小环境里跑通 `hello / doctor / inspect / credential-status / 正式签名流程`。
+- 修复 `doctor` 在 `gh` 不存在时崩溃的问题（独立部署下 `gh` 可能不在 PATH）。
+- 工具清单改为**隔离测试信任链**：lab/debug 构建可用 `ORDINA_DEV_MANIFEST_PUBLIC_KEY` 注入一次性公钥，Release 构建编译期剔除；验收不再读取生产签名密钥。生产清单仍由发版人本机 `ordina-sparkle` 密钥签名（`build_dev_tool.py --sign`），这是客户端固定公钥验签的必要条件。
+- 新增 ENOSPC 专项测试（`Tests/test_enospc.py` 5 项 + 端到端 `enospc_consistency`）：写资产/写清单/写 journal 三个位置注入真实 `errno.ENOSPC`，验证无半写文件、事务记录可恢复且恢复后无重复。开发者中心验收现为 **27 项全 pass**。
+- 版本号一致性由 `scripts/check_dev_tool_versions.py`（7 项）强制校验：入口脚本、清单、签名 payload、Release Tag、上传命令、产物哈希与纯净性全部对齐 1.0.0；报告 `docs/validation/tool-versions.json`。1.1.0 明确标注为验收构造的测试版本。
+- `publish_dev_tool.py` 统一工具通道的构建/签名/上传/清单发布/回滚准备；默认只预演（六阶段事务走 `DryRunBackend`，零副作用），`--publish-manifest --execute` 走阶段 A 持久事务，无裸 push / `gh api` / curl。回归见 `Tests/test_publish_dev_tool.py`（7 项）。
+- Xcode 工程已配置 1.10.0 (build 36)；完整三通道兼容矩阵与首次上线/回滚顺序见 [compatibility-matrix.md](compatibility-matrix.md)。
+
+### 上线命令清单（只准备与预演，未执行）
+
+严格顺序：**工具 → 插件 → 软件**；软件最后，因为它是唯一会通知全体用户的动作。所有清单写入都必须走阶段 A 六阶段持久事务。
 
 ```bash
-# 1) 构建并签名发布工具（产物不入库，需上传到 Release 资产）
+# ===== 通道 1：开发者发布工具（先上线，不影响任何现网客户端） =====
 python3 scripts/build_dev_tool.py --version 1.0.0 --sign
 python3 scripts/build_dev_tool.py --check
+python3 scripts/check_dev_tool_versions.py
 
-# 2) 上传工具资产（发版人手动执行，仓库地址固定）
 gh release create dev-tool-v1.0.0 dist/dev-tool/ordina-publisher-1.0.0.pyz \
   --repo BrOKenAG/ordina-releases --title "ordina publisher 1.0.0" --notes "首个独立发布工具"
 
-# 3) 发布签名工具清单到 Pages 根目录的 dev-tool/manifest.json
-#    （与 appcast/registry 一样走发布事务，不手工 curl）
+python3 scripts/publish_dev_tool.py --publish-manifest --execute \
+  --lab-report docs/validation/lab-release.json
 
-# 4) 客户端发版仍走阶段 A 事务：registry → 真实客户端验证 → appcast
-python3 scripts/publish_app_release.py --execute --lab-report docs/validation/lab-release.json
+# ===== 通道 2：插件（registry 保持 format 2，向后兼容 1.9.6） =====
+python3 scripts/publish_plugin.py <plugin-id> --source <源目录> --dry-run
+python3 scripts/publish_plugin.py <plugin-id> --source <源目录> --execute \
+  --lab-report docs/validation/lab-release.json
 
-# 5) 上线后体检
+# ===== 通道 3：软件本体 1.10.0 (build 36)，最后 =====
+python3 scripts/publish_app_release.py --app <ordina.app> \
+  --archive dist/ordina-1.10.0-build.36.dmg --feed appcast.xml \
+  --notes-file <notes.txt> --execute --lab-report docs/validation/lab-release.json
+python3 scripts/publish_app_release.py --app <ordina.app> \
+  --archive dist/ordina-1.10.0-build.36.dmg --feed appcast.xml \
+  --notes-file <notes.txt> --publish-appcast --execute \
+  --validation-report <真实客户端验证报告.json>
+
+# ===== 上线后只读体检 =====
 python3 scripts/check_feeds.py --remote
+python3 scripts/verify_standalone_tool.py
 python3 scripts/verify_developer_center.py
+
+# ===== 回滚（反向顺序，永不删除 Release 资产） =====
+# 软件：先停止 appcast 广播
+python3 scripts/rollback_feeds.py --to <已知良好提交> --dry-run
+# 插件：清单回退，逐一核对签名 / 版本 / 哈希
+python3 scripts/rollback_feeds.py --to <已知良好提交> --dry-run
+# 工具：清单回退 + 客户端本地工具回滚
+python3 scripts/publish_dev_tool.py --rollback-to 1.0.0 --prepare
+python3 scripts/publish_dev_tool.py --publish-manifest --execute \
+  --lab-report docs/validation/lab-release.json
+# 客户端：开发者中心 → 工具 → 回滚到 1.0.0
 ```
+
+> 上述命令在获得明确授权前**全部不执行**；`publish_dev_tool.py` 不带 `--execute` 时只做六阶段预演。
+
+### 最终收尾补充（本次真实执行）
+
+- **真实 App 隔离验收环境**：`scripts/prepare_app_acceptance.py` 一键生成 `dist/app-acceptance/`（独立 HOME、loopback Registry、隔离 lab 后端、一次性签名密钥、两个 lab 工具版本、5 类测试 ZIP、已通过真实六阶段事务发布的初始插件）。`scripts/app_acceptance_server.py` 提供全部只读路由；`scripts/verify_app_acceptance.py` 7 项校验工具清单/资产/Registry/插件清单/资产的签名与 SHA-256，并断言所有 URL 都指向 `127.0.0.1`，报告 [validation/app-acceptance-server.json](validation/app-acceptance-server.json)。
+- **隔离验收必须用 Debug 构建**：`DevBridge.isLab`、`PluginEnvironment.current`、`DevBridge.toolManifestPublicKey` 的隔离分支都由 `#if DEBUG || ORDINA_LAB` 控制，Release 构建会编译剔除并静默回落到正式 Pages / Registry / 生产公钥。因此 `launch.sh` 默认指向 `.build/Build/Products/Debug/ordina.app`，README 明确要求 `bash scripts/local_xcode_build.sh --debug`。正式 1.10.0 出包用 `--all`，与隔离验收分开。
+- **线上资源只读体检**：`python3 scripts/check_feeds.py --remote` 当前结果为 **4 项 FAIL**：`appcast 签名 OK`、`appcast 35 1.9.6 OK`（2,132,937 字节）、`registry 签名 OK`、`兼容清单 签名 OK`；但 `registry minutes/multicam` 报「缺少 v2 插件描述」，`兼容清单` 中两个插件报「registry 中未登记」。原因是线上 `registry.json` 仍是阶段 B 之前的描述（仅 `downloadPrefix/feed/kind/repository`），而当前 `build_feeds.py` 会额外写入 `protocol/symbol/minClientVersion/capabilities`。`dev-tool/manifest.json` 线上为 `HTTP 404`。这 4 项是**插件通道尚未按阶段 B v2 发布**的预期未上线状态，不是代码回归；也正说明首次上线必须按「工具 → 插件 → 软件」顺序，先让 registry / `manifest-v2.json` 带上完整 v2 描述，再发布 1.10.0。线上资源本轮只读，未做任何写入。
+- **真实 Xcode 构建阻塞仍在**：本轮按「优先申请正常本机执行权限」重试，关闭 agent 沙盒后直接运行 `xcodebuild -list` / `-resolvePackageDependencies` / `build`，仍在 `Resolve Package Graph` 阶段报 `sandbox-exec: sandbox_apply: Operation not permitted`（exit 74）。`/usr/bin/sandbox-exec -p '(version 1)(allow default)' /bin/echo` 单独执行成功，说明失败特定于 Xcode 26.3 / SwiftPM 的 package-graph sandbox profile；`SWIFTPM_DISABLE_SANDBOX=1` 只让一次 `-resolvePackageDependencies -skipPackageUpdates` 短暂成功，重复执行与正式 `build` 均再次失败；仓库没有独立 `Package.swift`，无法单独预热。**完整 Xcode 构建与真实 App 人工验收仍须由用户在本机 Xcode.app 或原生终端完成**，不得用 `swiftc -typecheck` 或单独编译的 harness 替代。完整命令见 `scripts/local_xcode_build.sh`。
+- **阶段 A 脚本健壮性修复**：`verify_lab_release.py` 的残留事务锁清理原本只在 `finally` 执行，若上一次运行被中断，下一次会在 `multi_file_transaction` 直接失败「release lock is held」；现改为运行前与结束后各清理一次，保证可重复执行。

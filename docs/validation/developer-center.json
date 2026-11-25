@@ -3,9 +3,16 @@
   "passed": true,
   "clientVersion": "1.10.0",
   "compiledOnce": true,
-  "harnessSha256": "914e4d57ad4e5fad6874d51a2c8095fe1922204e9e75332b491129e00ce988ac",
-  "toolVersion": "1.1.0",
+  "harnessSha256": "8d11457610fcd5b2a6a059d757026c3074ac1aa95f2d3ff8e8153f05f32a64ea",
+  "productionToolVersion": "1.0.0",
+  "labToolVersions": [
+    "1.0.0",
+    "1.1.0"
+  ],
+  "activeToolVersionAtEnd": "1.0.0",
   "toolProtocol": 1,
+  "trustChain": "isolated-lab-key",
+  "productionSigningKeyUsed": false,
   "checks": {
     "tool_absent": "pass",
     "tool_manifest": "pass",
@@ -32,6 +39,7 @@
     "unsigned_credential": "pass",
     "wrong_scope": "pass",
     "version_downgrade": "pass",
+    "enospc_consistency": "pass",
     "records_preserved": "pass"
   },
   "details": {
@@ -63,7 +71,7 @@
       "uninstalled": true
     },
     "preview": {
-      "fingerprint": "6d2ec0dc47db",
+      "fingerprint": "1904b3b9d956",
       "checks": 6
     },
     "preview_stale": {
@@ -127,10 +135,16 @@
     "version_downgrade": {
       "action": "downgrade"
     },
+    "enospc_consistency": {
+      "assetStage": "asset",
+      "feedStage": "feeds",
+      "resumed": true,
+      "duplicateRecords": 0
+    },
     "records_preserved": {
-      "records": 5,
-      "journals": 4
+      "records": 6,
+      "journals": 5
     }
   },
-  "timestamp": "2026-11-25T08:10:53Z"
+  "timestamp": "2026-11-25T09:48:45Z"
 }

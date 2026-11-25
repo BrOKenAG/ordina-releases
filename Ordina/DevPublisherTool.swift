@@ -196,7 +196,8 @@ struct LocalPublisherTool: DeveloperPublishing {
             for key in ["ORDINA_DEV_LAB", "ORDINA_DEV_BACKEND", "ORDINA_DEV_LAB_ROOT",
                         "ORDINA_DEV_CREDENTIALS", "ORDINA_DEV_MANIFEST",
                         "ORDINA_DEV_SIGN_KEY", "ORDINA_DEV_LAB_WRITE_SOURCE",
-                        "ORDINA_DEV_LAB_FAIL_AFTER", "ORDINA_DEV_LAB_BAD_ASSET"] {
+                        "ORDINA_DEV_LAB_FAIL_AFTER", "ORDINA_DEV_LAB_BAD_ASSET",
+                        "ORDINA_DEV_LAB_ENOSPC"] {
                 if let value = process[key] { values[key] = value }
             }
             values["ORDINA_DEV_LAB"] = "1"

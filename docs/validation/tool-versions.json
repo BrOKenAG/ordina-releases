@@ -1,0 +1,49 @@
+{
+  "format": 1,
+  "passed": true,
+  "productionToolVersion": "1.0.0",
+  "checks": {
+    "declared_version": "pass",
+    "manifest_version": "pass",
+    "signed_manifest": "pass",
+    "archive_version": "pass",
+    "no_secret_material": "pass",
+    "release_commands": "pass",
+    "acceptance_reports": "pass"
+  },
+  "details": {
+    "declared_version": {
+      "version": "1.0.0",
+      "protocol": 1
+    },
+    "manifest_version": {
+      "version": "1.0.0",
+      "tag": "dev-tool-v1.0.0"
+    },
+    "signed_manifest": {
+      "payloadMatches": true,
+      "signatureVerified": null
+    },
+    "archive_version": {
+      "sha256": "b4e5db0a0cbcc039",
+      "size": 61252,
+      "strayArchives": []
+    },
+    "no_secret_material": {
+      "scannedModules": 17
+    },
+    "release_commands": {
+      "versions": [
+        "1.0.0"
+      ]
+    },
+    "acceptance_reports": {
+      "productionToolVersion": "1.0.0",
+      "labToolVersions": [
+        "1.0.0",
+        "1.1.0"
+      ]
+    }
+  },
+  "timestamp": "2026-11-25T10:25:18Z"
+}

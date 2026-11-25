@@ -15,8 +15,6 @@ from pathlib import Path
 
 from sparkle_tools import ensure_tools, KEYCHAIN_ACCOUNT
 
-ROOT = Path(__file__).resolve().parents[1]
-
 
 def canonical(document):
     """Deterministic bytes: identical input always yields identical payload."""

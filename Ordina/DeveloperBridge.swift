@@ -403,6 +403,21 @@ enum DevBridge {
         return URL(string: "https://brokenag.github.io/ordina-releases/dev-tool/manifest.json")!
     }
 
+    /// The tool channel is verified with the key compiled into the app. Only a
+    /// lab/debug build may substitute an isolated test key, so acceptance runs
+    /// never need the production release key. A release build has no such
+    /// branch: the environment variable is compiled out entirely.
+    static var toolManifestPublicKey: Data {
+        #if DEBUG || ORDINA_LAB
+        if isLab,
+           let raw = ProcessInfo.processInfo.environment["ORDINA_DEV_MANIFEST_PUBLIC_KEY"],
+           let key = Data(base64Encoded: raw), key.count == 32 {
+            return key
+        }
+        #endif
+        return PluginEnvironment.productionPublicKey
+    }
+
     static var python: URL {
         if let raw = ProcessInfo.processInfo.environment["ORDINA_DEV_PYTHON"],
            FileManager.default.isExecutableFile(atPath: raw) {

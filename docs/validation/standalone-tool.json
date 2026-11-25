@@ -1,0 +1,74 @@
+{
+  "format": 1,
+  "passed": true,
+  "toolVersion": "1.0.0",
+  "archiveSha256": "b4e5db0a0cbcc0392143a5d83662072dc100d049588197d68d591d31bf02b6d8",
+  "archiveSize": 61252,
+  "checks": {
+    "archive_isolated": "pass",
+    "archive_integrity": "pass",
+    "hello": "pass",
+    "doctor": "pass",
+    "tools_root": "pass",
+    "inspect": "pass",
+    "credential_read": "pass",
+    "file_credential_refused": "pass",
+    "official_signing": "pass",
+    "lab_backend_refused": "pass",
+    "no_production_key": "pass"
+  },
+  "details": {
+    "archive_isolated": {
+      "members": 18,
+      "directory": "/var/folders/tz/n86m0_5s4yv2d5w0tpbp4rch0000gn/T/ordina-standalone-w1pi3r14/deployment"
+    },
+    "archive_integrity": {
+      "sha256": "b4e5db0a0cbcc039",
+      "version": "1.0.0",
+      "labSigningUnreachable": true
+    },
+    "hello": {
+      "version": "1.0.0",
+      "python": "3.9.6"
+    },
+    "doctor": {
+      "signing": "keychain",
+      "requirements": {
+        "python": true,
+        "signing": true,
+        "repository": true,
+        "credential": false,
+        "github": false
+      }
+    },
+    "tools_root": {
+      "default": "/private/var/folders/tz/n86m0_5s4yv2d5w0tpbp4rch0000gn/T/ordina-standalone-w1pi3r14/home/Library/Application Support/ordina/Publisher/tools/sparkle-2.10.1",
+      "override": "/private/var/folders/tz/n86m0_5s4yv2d5w0tpbp4rch0000gn/T/ordina-standalone-w1pi3r14/explicit-tools"
+    },
+    "inspect": {
+      "action": "new",
+      "files": 2,
+      "withoutRepository": true
+    },
+    "credential_read": {
+      "source": "keychain",
+      "valid": true
+    },
+    "file_credential_refused": {
+      "code": "auth.lab"
+    },
+    "official_signing": {
+      "mode": "keychain",
+      "calls": 2
+    },
+    "lab_backend_refused": {
+      "code": "backend.lab"
+    },
+    "no_production_key": {
+      "labSignKey": false,
+      "labMode": false,
+      "signingPath": "sign_update --account ordina-sparkle (stub)"
+    }
+  },
+  "timestamp": "2026-11-25T10:11:29Z"
+}

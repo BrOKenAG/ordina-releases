@@ -33,7 +33,7 @@ sys.path.insert(0, str(ROOT / 'scripts'))
 import build_dev_tool                                    # noqa: E402
 import lab_signing                                       # noqa: E402
 import plugin_protocol as pp                             # noqa: E402
-from feed_signing import canonical, decode_envelope, envelope_bytes  # noqa: E402
+from feed_signing import canonical, decode_envelope  # noqa: E402
 from verify_plugin_protocol import LabServer             # noqa: E402
 
 CLIENT_SOURCES = [
@@ -60,7 +60,8 @@ CHECKS = (
     'inspect_new', 'local_test', 'local_uninstall', 'preview',
     'preview_stale', 'malicious_zip', 'zip_bomb', 'version_downgrade',
     'publish_new', 'client_discovers_new_plugin', 'publish_update',
-    'interrupted_publish', 'concurrent_blocked', 'pending_blocks_tool_update',
+    'interrupted_publish', 'concurrent_blocked', 'enospc_consistency',
+    'pending_blocks_tool_update',
     'resume_publish', 'tool_update', 'publish_after_tool_update',
     'rollback_release', 'tool_rollback', 'unsigned_credential',
     'wrong_scope', 'records_preserved',
@@ -160,6 +161,20 @@ def main():
     sign_key.chmod(0o600)
     lab_public_key = base64.b64encode(lab_signing.public_key(lab_seed)).decode('ascii')
 
+    def lab_envelope(document):
+        """Sign a lab document with the throwaway seed.
+
+        Credentials, plugin feeds AND the developer-tool manifest all use this
+        isolated key. The client harness is given the matching public key via
+        ORDINA_DEV_MANIFEST_PUBLIC_KEY / ORDINA_PLUGIN_PUBLIC_KEY, which only
+        exist in a DEBUG or ORDINA_LAB build. A production release key is never
+        read, so an acceptance run cannot depend on the developer's Keychain.
+        """
+        data = canonical(document)
+        signature = base64.b64encode(lab_signing.signature(lab_seed, data)).decode('ascii')
+        return {'payload': base64.b64encode(data).decode('ascii'), 'signature': signature}
+
+
     harness = workspace / 'developer-center-harness'
     plugin_harness = workspace / 'plugin-client-harness'
     compile_harness(CLIENT_SOURCES, harness)
@@ -196,25 +211,15 @@ def main():
             })
         document = {'format': 1, 'tool': 'ordina-publisher', 'channel': 'stable',
                     'versions': entries}
-        server.routes['/dev-tool/manifest.json'] = envelope_bytes(document)
+        server.routes['/dev-tool/manifest.json'] = (json.dumps(
+            lab_envelope(document), separators=(',', ':')).encode('utf-8')
+            + b'\n')
 
     # Both releases exist in the tool channel from the start; the client simply
     # has not installed 1.1.0 yet, which is what the update flow exercises.
     publish_tool_manifest(['1.0.0', '1.1.0'])
 
     # --- credentials -----------------------------------------------------
-    def lab_envelope(document):
-        """Credentials are signed by the same key the tool verifies with.
-
-        In a lab that key is the throwaway seed handed to the tool through
-        ORDINA_DEV_SIGN_KEY, so the acceptance run never needs the developer's
-        Keychain. The tool manifest keeps the pinned production key because the
-        client verifies it against the key compiled into the app.
-        """
-        data = canonical(document)
-        signature = base64.b64encode(lab_signing.signature(lab_seed, data)).decode('ascii')
-        return {'payload': base64.b64encode(data).decode('ascii'), 'signature': signature}
-
     def write_credential(name, scopes):
         path = workspace / name
         payload = lab_envelope(credential_document(scopes))
@@ -234,6 +239,7 @@ def main():
     base_env = {
         'HOME': str(home),
         'ORDINA_DEV_SIGN_KEY': str(sign_key),
+        'ORDINA_DEV_MANIFEST_PUBLIC_KEY': lab_public_key,
         'ORDINA_CLIENT_VERSION': CLIENT_VERSION,
         'ORDINA_DEV_LAB': '1',
         'ORDINA_DEV_REPO': str(lab_repo),
@@ -652,6 +658,74 @@ def main():
             return {'action': 'downgrade'}
         check('version_downgrade', version_downgrade)
 
+        # 16. A full disk must leave files, installation state and transaction
+        #     records consistent; the SAME journal must resume without duplicates.
+        def enospc_consistency():
+            source_140 = workspace / 'src-1.4.0' / PLUGIN_ID
+            write_plugin(source_140, PLUGIN_ID, '1.4.0', 'enospc')
+            package = zip_plugin(source_140, workspace / f'{PLUGIN_ID}-1.4.0.zip')
+            status, preview_payload = run('preview', str(package),
+                                          '--notes', 'ENOSPC 专项')
+            require(preview_payload.get('ok'), preview_payload)
+            expected = preview_payload['fingerprint']
+            journals_before = run('journal-list')[1]['journals']
+            records_before = run('status')[1]['records']
+            registry_file = lab_repo / 'plugins' / 'registry.source.json'
+            version_before = json.loads(
+                registry_file.read_text())['plugins'][PLUGIN_ID]['version']
+            utility = (home / 'Library/Application Support/Blackmagic Design/'
+                       f'DaVinci Resolve/Fusion/Scripts/Utility/{PLUGIN_ID}.py')
+            utility_before = utility.read_bytes() if utility.is_file() else None
+            asset_dir = (lab_root / 'lab' / 'assets' /
+                         f'BrOKenAG/ordina-plugin-{PLUGIN_ID}' /
+                         f'plugin-{PLUGIN_ID}-v1.4.0')
+
+            # (a) ENOSPC while creating the Release asset: no file, no journal,
+            #     no record, no version change.
+            first = expect_failure('publish.failed', 'publish', str(package),
+                                   '--notes', 'ENOSPC 专项',
+                                   '--fingerprint', expected,
+                                   env={'ORDINA_DEV_LAB_ENOSPC': 'asset'})
+            require(first.get('stage') == 'asset', first)
+            require(not any(asset_dir.rglob('*')) if asset_dir.exists() else True,
+                    'ENOSPC 留下了半个发布资产')
+            require(len(run('journal-list')[1]['journals']) == len(journals_before),
+                    'ENOSPC 留下了不完整的事务记录')
+            require(run('status')[1]['records'] == records_before,
+                    'ENOSPC 之后写入了发布记录')
+            require(json.loads(registry_file.read_text())['plugins'][PLUGIN_ID]['version']
+                    == version_before, 'ENOSPC 改变了已发布的版本')
+
+            # (b) ENOSPC while writing a feed: journal is publishing and
+            #     resumable; no record; local installation state unchanged.
+            second = expect_failure('publish.failed', 'publish', str(package),
+                                    '--notes', 'ENOSPC 专项',
+                                    '--fingerprint', expected,
+                                    env={'ORDINA_DEV_LAB_ENOSPC': 'feed'})
+            require(second.get('stage') == 'feeds', second)
+            journal = Path(second['journal'])
+            require(journal.is_file(), 'ENOSPC 之后事务记录丢失')
+            document = json.loads(journal.read_text())
+            require(document['status'] == 'publishing', document['status'])
+            require(run('status')[1]['records'] == records_before,
+                    '未完成的发布写入了发布记录')
+            utility_after = utility.read_bytes() if utility.is_file() else None
+            require(utility_after == utility_before, 'ENOSPC 改动了本地安装状态')
+
+            # (c) Resuming the same journal completes without duplicating state.
+            status, resumed = run('resume', str(journal))
+            require(resumed.get('ok'), resumed)
+            require(json.loads(journal.read_text())['status'] == 'complete',
+                    '恢复后事务未标记完成')
+            require(run('status')[1]['records'] == records_before + 1,
+                    '恢复产生了重复发布记录')
+            listing = run('journal-list')[1]['journals']
+            require(sum(1 for item in listing if item['version'] == '1.4.0') == 1,
+                    '恢复产生了重复事务记录')
+            return {'assetStage': first['stage'], 'feedStage': second['stage'],
+                    'resumed': True, 'duplicateRecords': 0}
+        check('enospc_consistency', enospc_consistency)
+
         def records_preserved():
             status, payload = run('journal-list')
             kinds = {item['status'] for item in payload['journals']}
@@ -673,8 +747,12 @@ def main():
         'clientVersion': CLIENT_VERSION,
         'compiledOnce': True,
         'harnessSha256': harness_digest,
-        'toolVersion': '1.1.0',
+        'productionToolVersion': '1.0.0',
+        'labToolVersions': ['1.0.0', '1.1.0'],
+        'activeToolVersionAtEnd': '1.0.0',
         'toolProtocol': 1,
+        'trustChain': 'isolated-lab-key',
+        'productionSigningKeyUsed': False,
         'checks': checks,
         'details': details,
         'timestamp': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()),

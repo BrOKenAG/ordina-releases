@@ -1,0 +1,68 @@
+{
+  "format": 1,
+  "passed": true,
+  "root": "/Users/13rOKen4nGeL/Documents/Codex/2026-11-02/referenced-chatgpt-conversation-this-is-an-2/ordina-release-infrastructure/dist/app-acceptance",
+  "port": 18765,
+  "checks": {
+    "environment_isolation": "pass",
+    "tool_manifest": "pass",
+    "tool_assets": "pass",
+    "registry": "pass",
+    "plugin_manifest": "pass",
+    "plugin_asset": "pass",
+    "no_production_urls": "pass"
+  },
+  "details": {
+    "environment_isolation": {
+      "requiredBuildMode": "Debug",
+      "packages": [
+        "brand-new-plugin.zip",
+        "corrupt.zip",
+        "existing-plugin-update.zip",
+        "malicious.zip",
+        "zip-bomb.zip"
+      ],
+      "toolVersions": [
+        "1.0.0",
+        "1.1.0"
+      ],
+      "isolatedHome": "/Users/13rOKen4nGeL/Documents/Codex/2026-11-02/referenced-chatgpt-conversation-this-is-an-2/ordina-release-infrastructure/dist/app-acceptance/home"
+    },
+    "tool_manifest": {
+      "versions": [
+        "1.0.0",
+        "1.1.0"
+      ],
+      "channel": "stable"
+    },
+    "tool_assets": {
+      "sizes": {
+        "1.0.0": 66363,
+        "1.1.0": 66363
+      },
+      "hashAlgorithm": "sha256"
+    },
+    "registry": {
+      "plugins": [
+        "minutes-lab"
+      ],
+      "format": 2
+    },
+    "plugin_manifest": {
+      "version": "1.0.0",
+      "url": "http://127.0.0.1:18765/BrOKenAG/ordina-plugin-minutes-lab/releases/download/plugin-minutes-lab-v1.0.0/minutes-lab.json"
+    },
+    "plugin_asset": {
+      "size": 968,
+      "hash": "ok"
+    },
+    "no_production_urls": {
+      "checkedUrls": 5,
+      "absoluteLoopbackUrls": 4,
+      "allLoopback": true
+    }
+  },
+  "trustChain": "isolated-lab-key",
+  "productionResourcesTouched": false,
+  "timestamp": "2026-11-25T10:25:19Z"
+}

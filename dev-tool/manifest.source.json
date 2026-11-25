@@ -8,8 +8,8 @@
       "protocol": 1,
       "minClientVersion": "1.10.0",
       "asset": "ordina-publisher-1.0.0.pyz",
-      "sha256": "426975f6105e61727fcedbca55c1bafa58fe02ba324842938109d5e42252bf7d",
-      "size": 60503,
+      "sha256": "b4e5db0a0cbcc0392143a5d83662072dc100d049588197d68d591d31bf02b6d8",
+      "size": 61252,
       "tag": "dev-tool-v1.0.0",
       "url": "https://github.com/BrOKenAG/ordina-releases/releases/download/dev-tool-v1.0.0/ordina-publisher-1.0.0.pyz",
       "notes": ""

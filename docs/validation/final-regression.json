@@ -1,0 +1,96 @@
+{
+  "format": 1,
+  "generatedAt": "2026-11-25T10:25:00Z",
+  "scope": "阶段 C 最终收尾：全量回归（本次真实执行，未使用历史报告）",
+  "clientVersion": "1.10.0",
+  "clientBuild": "36",
+  "productionWrites": false,
+  "commands": [
+    {
+      "command": "python3 -B scripts/verify.py",
+      "exit": 0,
+      "result": "Python unittest 375 tests OK；Swift 独立验证 9 项全通过（含 VerifyDeveloperCenter: ok）；开发者中心 27 项验收全 pass",
+      "report": "docs/validation/developer-center.json"
+    },
+    {
+      "command": "python3 -B -m unittest discover -s Tests -p test_enospc.py -v",
+      "exit": 0,
+      "result": "ENOSPC 专项 5 tests OK",
+      "report": null
+    },
+    {
+      "command": "python3 -B scripts/verify_lab_release.py --execute",
+      "exit": 0,
+      "result": "阶段 A 私有测试仓库真实端到端 5 项全 pass：multi_file_transaction / rollback / lost_response_resume / pages_delay_resume / foreign_head_rejected；正式仓库未修改",
+      "report": "docs/validation/lab-release.json"
+    },
+    {
+      "command": "python3 -B scripts/verify_plugin_protocol.py",
+      "exit": 0,
+      "result": "阶段 B 插件协议 13 项全 pass",
+      "report": "docs/validation/plugin-protocol.json"
+    },
+    {
+      "command": "python3 -B scripts/verify_standalone_tool.py",
+      "exit": 0,
+      "result": "生产工具独立部署 11 项全 pass（脱离源码树、无 lab 变量、Keychain 搜索列表已恢复）",
+      "report": "docs/validation/standalone-tool.json"
+    },
+    {
+      "command": "python3 -B scripts/check_dev_tool_versions.py",
+      "exit": 0,
+      "result": "工具版本一致性与纯净性 7 项全 pass；正式通道唯一版本 1.0.0",
+      "report": "docs/validation/tool-versions.json"
+    },
+    {
+      "command": "python3 -B scripts/verify_app_acceptance.py",
+      "exit": 0,
+      "result": "隔离 loopback 验收环境 7 项全 pass（工具清单/资产/Registry/插件清单/资产验签+SHA-256，全部 URL 指向 127.0.0.1）",
+      "report": "docs/validation/app-acceptance-server.json"
+    },
+    {
+      "command": "python3 -B scripts/check_feeds.py --remote",
+      "exit": 1,
+      "result": "线上只读体检：appcast 签名与最新 1.9.6 (build 35, 2,132,937 字节) OK；registry 签名 OK；兼容清单签名 OK；但 4 项 FAIL —— registry minutes/multicam 缺少 v2 插件描述、兼容清单两插件 registry 中未登记。原因：线上 registry 仍是阶段 B 之前的描述，v2 字段尚未发布；dev-tool/manifest.json 线上 HTTP 404。属预期未上线状态，不是代码回归。",
+      "report": null
+    },
+    {
+      "command": "python3 -B scripts/publish_dev_tool.py",
+      "exit": 0,
+      "result": "零副作用预演：六阶段 preflight → asset → gate → feeds → push → postflight；未发布、未上传、未签名、未写入任何线上资源",
+      "report": null
+    },
+    {
+      "command": "bash -n scripts/local_xcode_build.sh dist/app-acceptance/{launch,verify,start-registry}.sh",
+      "exit": 0,
+      "result": "所有 shell 脚本语法检查通过",
+      "report": null
+    }
+  ],
+  "reports": {
+    "developer-center.json": {"passed": true, "checks": 27},
+    "lab-release.json": {"passed": true, "checks": 5},
+    "plugin-protocol.json": {"passed": true, "checks": 13},
+    "standalone-tool.json": {"passed": true, "checks": 11},
+    "tool-versions.json": {"passed": true, "checks": 7},
+    "app-acceptance-server.json": {"passed": true, "checks": 7}
+  },
+  "blockers": [
+    {
+      "item": "真实 Xcode 完整构建",
+      "status": "未解决",
+      "evidence": "关闭 agent 沙盒、以正常本机权限运行 xcodebuild -list / -resolvePackageDependencies / build，Resolve Package Graph 阶段仍报 sandbox-exec: sandbox_apply: Operation not permitted (exit 74)。/usr/bin/sandbox-exec 单独调用成功；SWIFTPM_DISABLE_SANDBOX=1 仅一次短暂成功不可复现；仓库无独立 Package.swift。"
+    },
+    {
+      "item": "真实 App 人工验收",
+      "status": "未解决",
+      "evidence": "需用户在 Xcode.app / 原生终端构建 Debug App 后，按 dist/app-acceptance/README.md 完成开发者中心启用、工具安装/更新/回滚、ZIP 拖入、发布/恢复/回滚、恶意 ZIP 拒绝与普通用户发现等人工交互。"
+    },
+    {
+      "item": "线上插件通道 v2 描述",
+      "status": "待首次上线发布（预期）",
+      "evidence": "check_feeds.py --remote 4 项 FAIL；须按 工具 → 插件 → 软件 顺序，用当前 build_feeds.py 重新生成并发布 registry 与 manifest-v2.json。"
+    }
+  ],
+  "completion": "阶段 C 未认定完成；待真实客户端验收通过且所有上线阻塞项解决后再确认。"
+}
