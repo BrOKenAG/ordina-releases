@@ -71,7 +71,7 @@
       "uninstalled": true
     },
     "preview": {
-      "fingerprint": "1904b3b9d956",
+      "fingerprint": "4d85b26d126f",
       "checks": 6
     },
     "preview_stale": {
@@ -146,5 +146,5 @@
       "journals": 5
     }
   },
-  "timestamp": "2026-11-25T09:48:45Z"
+  "timestamp": "2026-11-25T10:48:51Z"
 }

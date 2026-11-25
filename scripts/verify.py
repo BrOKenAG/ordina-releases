@@ -3,6 +3,13 @@
 
     python3 scripts/verify.py                 # everything, including the lab
     python3 scripts/verify.py --no-acceptance # skip the end-to-end lab run
+    python3 scripts/verify.py --no-typecheck  # skip the full-module Swift check
+
+The per-feature Swift harnesses below compile only a subset of the sources.
+verify_swift_typecheck.py additionally type-checks EVERY app source under the
+real Xcode compile settings (all upcoming features, incl. MemberImportVisibility)
+for Debug and Release. It needs Sparkle.framework from a prior build/resolve;
+if absent, use --no-typecheck (a full xcodebuild still covers it on a real Mac).
 """
 from pathlib import Path
 import os
@@ -11,7 +18,8 @@ import sys
 import tempfile
 
 arguments = sys.argv[1:]
-unknown = [item for item in arguments if item != '--no-acceptance']
+unknown = [item for item in arguments
+           if item not in ('--no-acceptance', '--no-typecheck')]
 if unknown:
     sys.exit('未知参数：' + ', '.join(unknown))
 
@@ -47,6 +55,22 @@ with tempfile.TemporaryDirectory(prefix='ordina-verification-') as temporary:
         command += [str(root / 'Tests' / (name + '.swift')), '-o', str(executable)]
         subprocess.run(command, cwd=root, env=environment, check=True)
         subprocess.run([str(executable)], cwd=temporary, env=environment, check=True)
+
+# Full-module Swift type-check under the real Xcode compile settings. It needs
+# Sparkle.framework from a prior build/resolve; skip (with a clear note) when
+# the workspace has not been built yet, so this file still runs on a clean tree.
+if '--no-typecheck' not in arguments:
+    products = root / '.build' / 'Build' / 'Products'
+    has_sparkle = any((products / cfg / 'Sparkle.framework').is_dir()
+                      for cfg in ('Debug', 'Release'))
+    if has_sparkle:
+        subprocess.run([sys.executable, '-B', str(root / 'scripts' /
+                                                  'verify_swift_typecheck.py')],
+                       cwd=root, env=environment, check=True)
+    else:
+        print('跳过全模块 Swift typecheck：缺少 Sparkle.framework'
+              '（先完成一次 Xcode 构建或包解析后自动启用）。')
+
 if '--no-acceptance' not in arguments:
     # The publishing tool, the client transport and the isolated backend are
     # exercised end to end in a throwaway HOME and lab repository.

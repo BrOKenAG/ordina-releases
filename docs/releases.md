@@ -27,6 +27,40 @@ xcodebuild: error: Could not resolve package dependencies:
 
 私钥保存在本机钥匙串账号 `ordina-sparkle` 下，不进入仓库，也不需要 CI Secrets。
 
+### 真实 Xcode 构建的编译设置（2026-11-25 修复）
+
+标准 Xcode 流程会把**全部** app 源码一起编译并开启工程的
+`SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES`（Debug/Release
+两个配置都在 `project.pbxproj`）。该特性要求：凡使用 `Combine` 定义的
+`ObservableObject` / `@Published` / `Publisher` 等符号的文件，必须显式
+`import Combine`，不能依赖 SwiftUI 的传递导入。
+
+`Ordina/OptionalPluginsView.swift` 的 `PluginCenterModel` 用了
+`ObservableObject` 与 4 个 `@Published` 却缺少该 import，首次真实
+`xcodebuild`（SwiftEmitModule normal arm64）因此失败：
+
+```
+OptionalPluginsView.swift:44:21: error: type 'PluginCenterModel' does not conform to protocol 'ObservableObject'
+OptionalPluginsView.swift:45:6: error: initializer 'init(wrappedValue:)' is not available due to missing import of defining module 'Combine'
+```
+
+之前 `verify.py` 的 Swift 验证只把**部分**源码与各自的 harness 一起编译，
+既不开 `MemberImportVisibility`，也不包含视图文件，所以从未暴露此错误。
+修复是在该文件补一行 `import Combine`（不删功能、不改隔离验收、不降安全标准）。
+
+防复发：`scripts/verify_swift_typecheck.py` 用 `swiftc -typecheck` 对**全部**
+app 源码、按工程的全部 upcoming features 分别在 Debug / Release 配置下做
+类型检查，并已接入 `verify.py`（检测到 `Sparkle.framework` 即自动运行，
+干净工作区可用 `--no-typecheck` 跳过）。它是编译/类型检查，不替代完整
+`xcodebuild`；真实构建仍须在非沙盒终端执行：
+
+```sh
+bash scripts/local_xcode_build.sh --debug     # Debug 完整构建（隔离验收用此产物）
+bash scripts/local_xcode_build.sh --release   # Release 构建 + 签名校验
+```
+
+结果见 `docs/validation/swift-typecheck.json`。
+
 ## 准备
 
 1. 在 Xcode 的 Debug、Release 配置中递增 `CURRENT_PROJECT_VERSION`，并设置 `MARKETING_VERSION`。
