@@ -262,6 +262,18 @@ def require(condition, message):
         raise AssertionError(message)
 
 
+def configure_lab_signing(workspace):
+    import lab_signing
+    seed = os.urandom(32)
+    key = workspace / 'lab-signing.key'
+    key.write_bytes(base64.b64encode(seed))
+    key.chmod(0o600)
+    os.environ['ORDINA_DEV_LAB'] = '1'
+    os.environ['ORDINA_DEV_SIGN_KEY'] = str(key)
+    os.environ['ORDINA_PLUGIN_PUBLIC_KEY'] = base64.b64encode(
+        lab_signing.public_key(seed)).decode('ascii')
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -273,6 +285,7 @@ def main():
     args = parser.parse_args()
 
     workspace = Path(tempfile.mkdtemp(prefix='ordina-plugin-lab-'))
+    configure_lab_signing(workspace)
     harness = args.harness or (workspace / 'ordina-plugin-harness')
     if not Path(harness).is_file():
         compile_harness(harness)
