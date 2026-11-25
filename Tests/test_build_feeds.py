@@ -20,13 +20,17 @@ class FeedDerivationTests(unittest.TestCase):
         self.assertTrue(self.plugins['minutes']['published'])
         self.assertFalse(self.plugins['yueliu']['published'])
 
-    def test_registry_exposes_no_version_information(self):
+    def test_registry_carries_descriptor_but_no_asset_secrets(self):
         registry, legacy, per_plugin = bf.documents(self.plugins)
         self.assertEqual(registry['format'], 2)
         for name, descriptor in registry['plugins'].items():
-            for leaked in ('version', 'sha256', 'size', 'asset', 'source', 'published'):
+            for leaked in ('sha256', 'size', 'asset', 'source', 'published', 'url', 'files'):
                 self.assertNotIn(leaked, descriptor, f'{name} 泄漏了 {leaked}')
-            self.assertEqual(set(descriptor), {'repository', 'feed', 'downloadPrefix', 'kind'})
+            required = {'repository', 'feed', 'downloadPrefix', 'kind', 'name',
+                        'summary', 'symbol', 'version', 'minClientVersion',
+                        'protocol', 'capabilities'}
+            self.assertEqual(set(descriptor), required)
+            self.assertEqual(descriptor['protocol'], 2)
 
     def test_legacy_feed_contains_every_published_plugin(self):
         registry, legacy, per_plugin = bf.documents(self.plugins)
@@ -38,8 +42,14 @@ class FeedDerivationTests(unittest.TestCase):
         self.assertEqual(set(per_plugin), set(bf.published(self.plugins)))
         for name, document in per_plugin.items():
             self.assertEqual(set(document['plugins']), {name})
-            self.assertEqual(document['plugins'][name]['version'], legacy['plugins'][name]['version'])
-            self.assertIn('/BrOKenAG/ordina-releases/releases/download/', legacy['plugins'][name]['url'])
+            entry = document['plugins'][name]
+            self.assertEqual(entry['version'], registry['plugins'][name]['version'])
+            self.assertEqual(entry['descriptor']['id'], name)
+            self.assertTrue(entry['files'])
+            # Legacy feeds are frozen at versions that still exist in the
+            # original release repository, so they may lag the current one.
+            self.assertIn('/BrOKenAG/ordina-releases/releases/download/',
+                          legacy['plugins'][name]['url'])
 
     def test_bundle_kind_is_only_emitted_for_bundles(self):
         registry, legacy, per_plugin = bf.documents(self.plugins)
@@ -48,11 +58,11 @@ class FeedDerivationTests(unittest.TestCase):
 
     def test_entry_url_is_built_from_own_repository(self):
         result = bf.entry('minutes', self.plugins['minutes'])
-        self.assertEqual(result['version'], '0.2.0')
+        self.assertEqual(result['version'], self.plugins['minutes']['version'])
         self.assertEqual(
             result['url'],
             'https://github.com/BrOKenAG/ordina-plugin-minutes/releases/download/'
-            'plugin-minutes-v0.2.0/minutes.json')
+            f'plugin-minutes-v{self.plugins["minutes"]["version"]}/minutes.json')
         self.assertTrue(result['url'].startswith(
             'https://github.com/' + self.plugins['minutes']['repository']))
         self.assertFalse(result['url'].startswith(

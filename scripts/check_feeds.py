@@ -26,6 +26,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 from sparkle_tools import KEYCHAIN_ACCOUNT
+import plugin_protocol as protocol
 
 ROOT = Path(__file__).resolve().parents[1]
 PAGES = 'https://brokenag.github.io/ordina-releases'
@@ -138,6 +139,16 @@ def check_registry(label, raw, tool, tmp, index):
             problems.append('仓库不属于本项目')
         if descriptor.get('kind') not in (None, 'bundle', 'script'):
             problems.append('kind 不合法')
+        if descriptor.get('protocol') != protocol.PROTOCOL:
+            problems.append('缺少 v2 插件描述')
+        elif not protocol.valid_symbol(descriptor.get('symbol')):
+            problems.append('插件图标不合法')
+        elif not protocol.valid_version(descriptor.get('minClientVersion')):
+            problems.append('最低客户端版本不合法')
+        elif (not isinstance(descriptor.get('capabilities'), list)
+              or any(item not in protocol.CAPABILITIES
+                     for item in descriptor['capabilities'])):
+            problems.append('能力集合不合法')
         if problems:
             rows.append((f'{label} {name}', 'FAIL', '；'.join(problems)))
         else:
@@ -163,6 +174,12 @@ def check_plugins(label, raw, descriptors, tool, tmp, timeout, download_assets, 
         if problem:
             rows.append((f'插件 {name} v{entry.get("version", "?")}', 'FAIL', problem))
             continue
+        if not legacy and label != '兼容清单':
+            try:
+                protocol.validate_manifest_entry(name, entry)
+            except ValueError as error:
+                rows.append((f'插件 {name} v{entry.get("version", "?")}', 'FAIL', f'v2 描述无效：{error}'))
+                continue
         if not download_assets:
             rows.append((f'插件 {name} v{entry["version"]}', 'OK  ', '地址规则通过（预演模式）'))
             continue
@@ -171,11 +188,15 @@ def check_plugins(label, raw, descriptors, tool, tmp, timeout, download_assets, 
         if code != '200':
             rows.append((f'插件 {name} v{entry["version"]}', 'FAIL', f'HTTP {code}'))
             continue
-        digest = hashlib.sha256(target.read_bytes()).hexdigest()
+        data = target.read_bytes()
+        digest = hashlib.sha256(data).hexdigest()
         if digest != entry['sha256']:
             rows.append((f'插件 {name} v{entry["version"]}', 'FAIL', 'SHA-256 不匹配'))
             continue
-        rows.append((f'插件 {name} v{entry["version"]}', 'OK  ', f'{target.stat().st_size:,} 字节'))
+        if 'size' in entry and len(data) != entry['size']:
+            rows.append((f'插件 {name} v{entry["version"]}', 'FAIL', '大小不匹配'))
+            continue
+        rows.append((f'插件 {name} v{entry["version"]}', 'OK  ', f'{len(data):,} 字节'))
     return rows
 
 

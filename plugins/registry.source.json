@@ -1,6 +1,6 @@
 {
   "format": 2,
-  "_comment": "唯一插件元数据源。所有签名清单由 scripts/build_feeds.py 从本文件派生，禁止手工编辑 registry.json / plugins/manifest.json / 各插件仓库 manifest.json。",
+  "_comment": "唯一插件元数据源。所有签名清单由 scripts/build_feeds.py 从本文件派生，禁止手工编辑 registry.json / plugins/manifest.json / 各插件仓库 manifest.json。name/summary/symbol/minClientVersion/capabilities 构成客户端展示与安装所需的全部插件描述；files 由发布事务在 GATE 通过后写入。",
   "plugins": {
     "minutes": {
       "repository": "BrOKenAG/ordina-plugin-minutes",
@@ -10,9 +10,105 @@
       "asset": "minutes.json",
       "source": "Minutes Roughcut",
       "published": true,
-      "version": "0.2.0",
-      "sha256": "8ee9e102a4e80ad8063596748d0d037edcf711da6cc182917c6ad52abcf8010c",
-      "size": 60688,
+      "version": "0.3.0",
+      "sha256": "5fca1819d4854461c58622cd69c8e1d9d0177dc7306d65e14c9b7af021597b56",
+      "size": 61956,
+      "name": "Minutes Roughcut",
+      "summary": "将飞书妙记划稿发送至 Resolve",
+      "symbol": "text.badge.plus",
+      "minClientVersion": "1.9.6",
+      "protocol": 2,
+      "capabilities": [
+        "resolve.utilityScript",
+        "resolve.support",
+        "chrome.nativeMessagingHost",
+        "chrome.unpackedExtension"
+      ],
+      "supportDirectoryName": "Minutes Roughcut",
+      "nativeMessagingHost": "host.command",
+      "files": [
+        {
+          "path": "Minutes Roughcut.py",
+          "sha256": "710fda82cae67bd0d42e8e2ba330729985e8437d471c7219d89f245dd350d6ab",
+          "size": 25926,
+          "role": "utilityScript",
+          "installName": "Minutes Roughcut.py"
+        },
+        {
+          "path": "chrome/com.minutesroughcut.bridge.json",
+          "sha256": "aac1ded280010554e003add1a7cd0c13ac4ab40ce4399c7e159a4e90799a6d0f",
+          "size": 186,
+          "role": "nativeMessagingManifest",
+          "installName": "com.minutesroughcut.bridge.json"
+        },
+        {
+          "path": "extension/bridge.js",
+          "sha256": "c44ae011eedbceeb37f12893e987f30b3128814864373c81cefa9aa95845284b",
+          "size": 652,
+          "role": "extension"
+        },
+        {
+          "path": "extension/capture.js",
+          "sha256": "20e980f4248ee4561daa863ded9c2119d0ad06cc6d477ad3e28b7b61d1c6ebb4",
+          "size": 1961,
+          "role": "extension"
+        },
+        {
+          "path": "extension/core.js",
+          "sha256": "4453718656566e0275e7e9a127900d0b34698144508f9f38edcb38aac75d2746",
+          "size": 1042,
+          "role": "extension"
+        },
+        {
+          "path": "extension/icons/logo.png",
+          "sha256": "ec2c4d61ae61602b95a8ee8511ca7aab55a4b401d81723bce6ab70f1b2886df5",
+          "size": 3448,
+          "role": "extension"
+        },
+        {
+          "path": "extension/manifest.json",
+          "sha256": "fc5b4e2ca4f70f62d5e0efe872a6a0fd2e3339b09ed56bde42afeea62418da8f",
+          "size": 1326,
+          "role": "extension"
+        },
+        {
+          "path": "extension/popup.html",
+          "sha256": "206a1f07eb9391419860d3830a3ae532d2d33f2b66a510021c9f1ed30aa71091",
+          "size": 1252,
+          "role": "extension"
+        },
+        {
+          "path": "extension/popup.js",
+          "sha256": "3e8e380993a763ed21b6533491c2c0420f4f5614590ec9d752558e1905e47fb6",
+          "size": 2808,
+          "role": "extension"
+        },
+        {
+          "path": "extension/style.css",
+          "sha256": "b3466efa3cb0ff439ea8e4f11f02614391f6b023e78cc4bec17b785dafeab088",
+          "size": 3341,
+          "role": "extension"
+        },
+        {
+          "path": "host.command",
+          "sha256": "9d106bfd4b6969ce1e5a96fa83ee5f250e151bd6beca7e56e7b6db0d7fb10762",
+          "size": 164,
+          "role": "nativeMessagingHost",
+          "executable": true
+        },
+        {
+          "path": "host.py",
+          "sha256": "7c00d85b2e32d8c0e6e4480d9e05d272d4cbc55e6c2b2b679bb4d89cb9ac3d68",
+          "size": 3143,
+          "role": "support"
+        },
+        {
+          "path": "plugin.json",
+          "sha256": "a226cb6baf1c3d84b64a9b92d838c153965295f1b97c85b83b2c19885b29b2ad",
+          "size": 920,
+          "role": "metadata"
+        }
+      ],
       "legacy": {
         "version": "0.2.0",
         "sha256": "8ee9e102a4e80ad8063596748d0d037edcf711da6cc182917c6ad52abcf8010c",
@@ -25,11 +121,20 @@
       "downloadPrefix": "/BrOKenAG/ordina-plugin-multicam/releases/download/",
       "kind": "script",
       "asset": "Multicam.Tools.py",
+      "installName": "Multicam Tools.py",
       "source": "Multicam Tools.py",
       "published": true,
       "version": "2.1",
       "sha256": "145c1af43e950220bb839f2e187c12abe8382c5673d745659d794535675883b0",
       "size": 37757,
+      "name": "Multicam Tools",
+      "summary": "批量命名机位，创建多机位片段",
+      "symbol": "video",
+      "minClientVersion": "1.9.6",
+      "protocol": 2,
+      "capabilities": [
+        "resolve.utilityScript"
+      ],
       "legacy": {
         "version": "2.1",
         "sha256": "145c1af43e950220bb839f2e187c12abe8382c5673d745659d794535675883b0",
@@ -42,8 +147,23 @@
       "downloadPrefix": "/BrOKenAG/ordina-plugin-yueliu/releases/download/",
       "kind": "script",
       "asset": "Import.YueLiu.py",
+      "installName": "Import YueLiu.py",
       "source": "Import YueLiu.py",
-      "published": false
+      "published": false,
+      "version": "1.0.0",
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "size": 1,
+      "name": "Import YueLiu",
+      "summary": "导入阅流审片意见",
+      "symbol": "text.bubble",
+      "minClientVersion": "1.9.6",
+      "protocol": 2,
+      "capabilities": [
+        "resolve.utilityScript"
+      ],
+      "legacyNames": [
+        "导入阅流.py"
+      ]
     }
   }
 }

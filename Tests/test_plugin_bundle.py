@@ -1,5 +1,6 @@
 """Regression tests for independent bundle-plugin packaging and installation."""
 import base64
+import hashlib
 import importlib.util
 import json
 import os
@@ -32,36 +33,87 @@ class BundlePackagingTests(unittest.TestCase):
         self.publisher = load('publish_plugin')
 
     def test_container_is_deterministic_and_excludes_installer(self):
-        first, version = self.publisher.build_bundle(BUNDLE)
-        second, _ = self.publisher.build_bundle(BUNDLE)
+        first, version, files = self.publisher.build_bundle(BUNDLE)
+        second, _, again = self.publisher.build_bundle(BUNDLE)
         self.assertEqual(first, second)
-        self.assertEqual(version, '0.2.0')
+        self.assertEqual(version, json.loads((BUNDLE / 'plugin.json').read_text())['version'])
+        self.assertEqual(files, again)
         document = json.loads(first)
         self.assertEqual(document['format'], 1)
         self.assertEqual(document['id'], 'minutes')
         self.assertEqual(document['version'], version)
         self.assertNotIn('install.py', document['files'])
-        for required in self.publisher.BUNDLE_REQUIRED:
-            self.assertIn(required, document['files'])
-        for name in document['files']:
-            self.assertFalse(name.startswith('/'))
-            self.assertNotIn('..', name.split('/'))
-            self.assertTrue(base64.b64decode(document['files'][name], validate=True))
+        roles = {item['path']: item['role'] for item in files}
+        self.assertEqual(roles['plugin.json'], 'metadata')
+        self.assertEqual(roles['Minutes Roughcut.py'], 'utilityScript')
+        self.assertEqual(roles['host.command'], 'nativeMessagingHost')
+        self.assertEqual(roles['chrome/com.minutesroughcut.bridge.json'],
+                         'nativeMessagingManifest')
+        self.assertEqual(roles['extension/manifest.json'], 'extension')
+        self.assertEqual(roles['extension/icons/logo.png'], 'extension')
+        for item in files:
+            self.assertFalse(item['path'].startswith('/'))
+            self.assertNotIn('..', item['path'].split('/'))
+            data = base64.b64decode(document['files'][item['path']], validate=True)
+            self.assertTrue(data)
+            self.assertEqual(hashlib.sha256(data).hexdigest(), item['sha256'])
+            self.assertEqual(len(data), item['size'])
 
-    def test_missing_version_marker_is_rejected(self):
+    def test_bundle_can_use_a_plugin_id_the_client_never_knew(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary) / 'demo notes'
+            directory.mkdir()
+            (directory / 'plugin.json').write_text(json.dumps({
+                'id': 'demo-notes',
+                'name': 'Demo Notes',
+                'version': '1.0.0',
+                'summary': 'A plugin the client has never seen',
+                'symbol': 'note.text',
+                'minClientVersion': '1.9.6',
+                'protocol': 2,
+                'capabilities': ['resolve.utilityScript'],
+                'files': {'Demo Notes.py': {'role': 'utilityScript'}},
+            }), encoding='utf-8')
+            (directory / 'Demo Notes.py').write_text('PLUGIN_VERSION = "v1.0.0"\n')
+            data, version, files = self.publisher.build_bundle(directory, expected_id='demo-notes')
+            self.assertEqual(version, '1.0.0')
+            self.assertEqual(json.loads(data)['id'], 'demo-notes')
+            self.assertEqual([item['role'] for item in files],
+                             ['utilityScript', 'metadata'])
+
+    def test_undeclared_file_role_is_rejected(self):
         with tempfile.TemporaryDirectory() as temporary:
             directory = Path(temporary)
-            for item in self.publisher.BUNDLE_REQUIRED:
-                path = directory / item
-                path.parent.mkdir(parents=True, exist_ok=True)
-                path.write_bytes(b'x')
-            with self.assertRaises(Exception):
+            (directory / 'plugin.json').write_text(json.dumps({
+                'id': 'demo', 'name': 'Demo', 'version': '1.0.0',
+                'summary': 'demo', 'symbol': 'doc', 'minClientVersion': '1.9.6',
+                'capabilities': ['resolve.utilityScript'],
+                'files': {'Demo.py': {'role': 'utilityScript'}},
+            }), encoding='utf-8')
+            (directory / 'Demo.py').write_text('x')
+            (directory / 'extra.sh').write_text('#!/bin/sh')
+            with self.assertRaises(ValueError):
+                self.publisher.build_bundle(directory)
+
+    def test_missing_utility_script_is_rejected(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            (directory / 'plugin.json').write_text(json.dumps({
+                'id': 'demo', 'name': 'Demo', 'version': '1.0.0',
+                'summary': 'demo', 'symbol': 'doc', 'minClientVersion': '1.9.6',
+                'capabilities': ['resolve.utilityScript'], 'files': {},
+            }), encoding='utf-8')
+            with self.assertRaises(ValueError):
                 self.publisher.build_bundle(directory)
 
     def test_invalid_version_is_rejected(self):
         with tempfile.TemporaryDirectory() as temporary:
             directory = Path(temporary)
-            (directory / 'plugin.json').write_text(json.dumps({'id': 'minutes', 'version': 'latest'}))
+            (directory / 'plugin.json').write_text(json.dumps({
+                'id': 'minutes', 'name': 'Minutes', 'version': 'latest',
+                'summary': 'x', 'symbol': 'doc', 'minClientVersion': '1.9.6',
+                'capabilities': ['resolve.utilityScript'],
+            }), encoding='utf-8')
             with self.assertRaises(ValueError):
                 self.publisher.build_bundle(directory)
 
@@ -75,7 +127,8 @@ class BundlePackagingTests(unittest.TestCase):
                            env=environment, check=True, capture_output=True)
             support = home / 'Library/Application Support/Minutes Roughcut'
             marker = json.loads((support / 'installed.json').read_text())
-            self.assertEqual(marker['version'], '0.2.0')
+            expected = json.loads((BUNDLE / 'plugin.json').read_text())['version']
+            self.assertEqual(marker['version'], expected)
             self.assertEqual(marker['id'], 'minutes')
             self.assertTrue((support / 'extension/manifest.json').is_file())
             self.assertTrue((home / 'Library/Application Support/Google/Chrome/NativeMessagingHosts/'
@@ -85,7 +138,8 @@ class BundlePackagingTests(unittest.TestCase):
             # A second install must remain idempotent and keep the marker.
             subprocess.run(['/usr/bin/python3', str(BUNDLE / 'install.py')],
                            env=environment, check=True, capture_output=True)
-            self.assertEqual(json.loads((support / 'installed.json').read_text())['version'], '0.2.0')
+            self.assertEqual(
+                json.loads((support / 'installed.json').read_text())['version'], expected)
 
 
 if __name__ == '__main__':

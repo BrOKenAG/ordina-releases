@@ -46,6 +46,8 @@ The current release is ad-hoc signed and has not been notarized by Apple. On fir
 
 Install or update scripts from ordina's plugin manager. Open them from Resolve's **Workspace → Scripts → Utility** menu; restart Resolve if a newly installed script does not appear. Import YueLiu needs `openpyxl` in Resolve's Python environment. Minutes Roughcut also includes a browser extension; see below.
 
+The plugin list comes from a signed registry rather than being hardcoded in the app. Adding a plugin only requires publishing its repository and updating the registry: an already-shipped ordina discovers, displays, installs, and updates it without rebuilding or re-releasing the client. See [docs/plugin-distribution.md](docs/plugin-distribution.md) for the descriptor fields and release flow.
+
 ## Minutes Roughcut
 
 Minutes Roughcut sends the ranges you keep in a Feishu Minutes transcript to DaVinci Resolve and builds a rough-cut timeline from them. It ships as a Resolve script, a Chrome extension, and a local messaging host.

@@ -197,4 +197,14 @@ python3 scripts/check_feeds.py --remote
 - 生产后端在写入前复核资产 GET/哈希/Ed25519、签名清单引用、清单过渡规则与白名单 URL；完成前读回 Pages 内容并内置重试。
 - `scripts/verify_lab_release.py --execute` 在私有测试仓库完成五项真实端到端验证；报告 `docs/validation/lab-release.json` 是正式发布的前置条件。
 - `build_feeds.py --push`、`rollback_feeds.py --push` 等旧直接推送入口仍停用；标准 Xcode 构建流程未改动，未引入 CI Secrets。
-- 阶段 B（动态插件协议与插件中心）尚未开始；新增插件仍需实现客户端入口，不能仅靠发布 registry 自动发现。阶段划分与验收目标见仓库根目录的 [阶段A进度与阶段B方案.md](../阶段A进度与阶段B方案.md)，其中阶段 A 的「尚未完成」项现均已落地。
+- 阶段划分与验收目标见仓库根目录的 [阶段A进度与阶段B方案.md](../阶段A进度与阶段B方案.md)。
+
+## 阶段 B 完成状态
+
+- 插件描述协议 v2 已落地（`Ordina/PluginProtocol.swift`，Python 侧同构实现 `scripts/plugin_protocol.py`）：`descriptor` 声明 id/名称/图标/版本/最低客户端版本/类型/能力/支持目录/宿主清单名/旧文件名，`files[]` 声明路径、大小、哈希、角色、安装名与可执行位。
+- 签名 Registry（`format: 2`）与签名插件清单（`format: 1`）保持向后兼容，只追加字段；1.9.4 / 1.9.5 / 1.9.6 旧客户端继续读取原字段。
+- 客户端不再有 `OptionalPlugin.allCases` 或任何插件 id 分支：`PluginCatalog` 从 Registry 动态发现并合并本地安装记录，`OptionalPluginsView` 只渲染 `PluginCatalog.Item`。
+- 安装、更新、卸载、完整性校验、兼容性判断、并发锁与失败回滚统一收敛到 `PluginInstaller`；文件清单由签名清单声明，客户端内不再写死。
+- 能力白名单只有 `resolve.utilityScript`、`resolve.support`、`chrome.nativeMessagingHost`、`chrome.unpackedExtension` 四项；descriptor 无法携带 shell 命令、绝对路径或任意目标路径，安装行为仍完全由客户端编译期逻辑决定。
+- 验收：`scripts/verify_plugin_protocol.py` 编译一份快照客户端，在 loopback 隔离环境发布客户端源码完全不认识的新插件 ID，完成发现/展示/安装/更新/卸载/回滚，并覆盖 Registry 不可用、签名错误、资产损坏、版本不兼容、安装中断；报告 [validation/plugin-protocol.json](validation/plugin-protocol.json) 全项 `pass`。
+- 新插件上线流程（无需重编译客户端）与新协议字段说明见 [plugin-distribution.md](plugin-distribution.md)。

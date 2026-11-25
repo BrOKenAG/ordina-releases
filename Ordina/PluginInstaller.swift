@@ -1,0 +1,444 @@
+import Foundation
+import Darwin
+
+// One installer for every plugin, driven only by the signed descriptor and file
+// inventory. Capabilities are compiled into the client: a descriptor selects
+// behaviour, it never supplies a command or an absolute destination.
+struct InstalledFile: Codable, Equatable, Sendable {
+    let target: String          // path relative to the user's home
+    let sha256: String
+    let role: String
+    let executable: Bool
+}
+
+struct InstalledPlugin: Codable, Equatable, Sendable {
+    let id: String
+    let version: String
+    let descriptor: PluginDescriptor
+    let files: [InstalledFile]
+    let installedAt: TimeInterval
+    let legacyMarker: String?
+}
+
+enum PluginInstallStatus: Equatable, Sendable {
+    case notInstalled
+    case current(version: String)
+    case updateAvailable(installed: String, latest: String)
+    case unmanaged(version: String?)
+    case incompatible(required: String)
+
+    var isInstalled: Bool {
+        switch self {
+        case .current, .updateAvailable, .unmanaged: return true
+        case .notInstalled, .incompatible: return false
+        }
+    }
+}
+
+enum PluginInstaller {
+    enum Failure: LocalizedError, Equatable {
+        case newerInstalled
+        case incompatible(String)
+        case missingSupport(String)
+        case linkedPath
+        case invalidManifest
+        case writeFailed(String)
+
+        var errorDescription: String? {
+            switch self {
+            case .newerInstalled: return "已安装更新的插件版本。"
+            case .incompatible(let version): return "需要 ordina \(version) 或更高版本。"
+            case .missingSupport(let name): return "缺少安装文件：\(name)"
+            case .linkedPath: return "安装路径包含符号链接，请改用实际目录后重试。"
+            case .invalidManifest: return "浏览器通信配置无效。"
+            case .writeFailed(let name): return "无法写入 \(name)。"
+            }
+        }
+    }
+
+    private static let lock = NSLock()
+
+    private struct PlannedFile {
+        let relative: String     // relative to home
+        let data: Data
+        let executable: Bool
+        let role: PluginFileRole
+    }
+
+    static func state(_ id: String, environment: PluginEnvironment) -> InstalledPlugin? {
+        guard let data = try? Data(contentsOf: environment.stateFile(id)),
+              let value = try? JSONDecoder().decode(InstalledPlugin.self, from: data),
+              value.id == id else { return nil }
+        return value
+    }
+
+    static func inspect(_ descriptor: PluginDescriptor,
+                        environment: PluginEnvironment = .current) -> PluginInstallStatus {
+        guard PluginProtocol.supports(clientVersion: environment.clientVersion,
+                                      minimum: descriptor.minClientVersion) else {
+            return .incompatible(required: descriptor.minClientVersion)
+        }
+        if let installed = state(descriptor.id, environment: environment) {
+            if installed.version == descriptor.version { return .current(version: installed.version) }
+            if PluginProtocol.newer(descriptor.version, than: installed.version) {
+                return .updateAvailable(installed: installed.version, latest: descriptor.version)
+            }
+            return .current(version: installed.version)
+        }
+        // Migration: the pre-protocol Minutes bundle wrote installed.json.
+        if let marker = legacyMarker(descriptor, environment: environment),
+           let version = marker.version {
+            if version == descriptor.version { return .current(version: version) }
+            if PluginProtocol.newer(descriptor.version, than: version) {
+                return .updateAvailable(installed: version, latest: descriptor.version)
+            }
+            return .current(version: version)
+        }
+        let utility = utilityTarget(descriptor, environment: environment)
+        if FileManager.default.fileExists(atPath: utility.path) {
+            return .unmanaged(version: nil)
+        }
+        for name in descriptor.legacyNames ?? [] {
+            if FileManager.default.fileExists(atPath: utility.deletingLastPathComponent()
+                .appendingPathComponent(name).path) {
+                return .unmanaged(version: nil)
+            }
+        }
+        return .notInstalled
+    }
+
+    static func install(_ release: PluginRelease, files: [String: Data],
+                        environment: PluginEnvironment = .current) throws {
+        lock.lock()
+        defer { lock.unlock() }
+        try withFileLock(environment) {
+            try performInstall(release, files: files, environment: environment)
+        }
+    }
+
+    private static func performInstall(_ release: PluginRelease, files: [String: Data],
+                                       environment: PluginEnvironment) throws {
+        let descriptor = release.descriptor
+        guard PluginProtocol.supports(clientVersion: environment.clientVersion,
+                                      minimum: descriptor.minClientVersion) else {
+            throw Failure.incompatible(descriptor.minClientVersion)
+        }
+        if let installed = state(descriptor.id, environment: environment),
+           PluginProtocol.newer(installed.version, than: descriptor.version) {
+            throw Failure.newerInstalled
+        }
+        let plan = try plannedFiles(release, files: files, environment: environment)
+        let manager = FileManager.default
+        let stateDirectory = environment.stateDirectory(descriptor.id)
+        let staging = stateDirectory.appendingPathComponent("staging-" + UUID().uuidString)
+        try manager.createDirectory(at: staging, withIntermediateDirectories: true)
+        defer { try? manager.removeItem(at: staging) }
+
+        // Stage every payload first. A failure here leaves the existing
+        // installation untouched.
+        var staged: [PlannedFile] = []
+        for (index, item) in plan.enumerated() {
+            let url = staging.appendingPathComponent(String(index))
+            do {
+                try item.data.write(to: url, options: .atomic)
+            } catch {
+                throw Failure.writeFailed(item.relative)
+            }
+            staged.append(item)
+        }
+
+        let backup = stateDirectory
+            .appendingPathComponent("backups", isDirectory: true)
+            .appendingPathComponent(timestamp(), isDirectory: true)
+        var applied: [(target: URL, backup: URL?, existed: Bool)] = []
+        do {
+            for (index, item) in staged.enumerated() {
+                let target = try checkedPath(home: environment.home, relative: item.relative)
+                try manager.createDirectory(at: target.deletingLastPathComponent(),
+                                            withIntermediateDirectories: true)
+                let exists = manager.fileExists(atPath: target.path)
+                var saved: URL?
+                if exists {
+                    let current = try Data(contentsOf: target)
+                    if current == item.data {
+                        applied.append((target, nil, true))
+                        continue
+                    }
+                    let destination = backup.appendingPathComponent("\(index)-" + target.lastPathComponent)
+                    try manager.createDirectory(at: backup, withIntermediateDirectories: true)
+                    try current.write(to: destination, options: .atomic)
+                    saved = destination
+                }
+                let temporary = target.deletingLastPathComponent()
+                    .appendingPathComponent(".ordina-" + UUID().uuidString)
+                try item.data.write(to: temporary, options: .atomic)
+                if exists {
+                    _ = try manager.replaceItemAt(target, withItemAt: temporary)
+                } else {
+                    try manager.moveItem(at: temporary, to: target)
+                }
+                if item.executable {
+                    try manager.setAttributes([.posixPermissions: 0o700], ofItemAtPath: target.path)
+                }
+                applied.append((target, saved, exists))
+            }
+        } catch {
+            // Roll back in reverse order: restore backups, remove new files.
+            for record in applied.reversed() {
+                if let saved = record.backup, let data = try? Data(contentsOf: saved) {
+                    try? data.write(to: record.target, options: .atomic)
+                } else if !record.existed {
+                    try? manager.removeItem(at: record.target)
+                }
+            }
+            throw Failure.writeFailed(error.localizedDescription)
+        }
+
+        let recorded = staged.map {
+            InstalledFile(target: $0.relative, sha256: PluginProtocol.digest($0.data),
+                          role: $0.role.rawValue, executable: $0.executable)
+        }
+        let marker = legacyMarker(descriptor, environment: environment)?.path
+        let record = InstalledPlugin(id: descriptor.id, version: descriptor.version,
+                                     descriptor: descriptor, files: recorded,
+                                     installedAt: Date().timeIntervalSince1970,
+                                     legacyMarker: marker)
+        try manager.createDirectory(at: stateDirectory, withIntermediateDirectories: true)
+        let encoded = try JSONEncoder().encode(record)
+        try encoded.write(to: environment.stateFile(descriptor.id), options: .atomic)
+
+        // Remove pre-protocol names only after the new install is recorded.
+        for name in descriptor.legacyNames ?? [] {
+            let legacy = try checkedPath(home: environment.home,
+                                         relative: relative(environment.utilityDirectory
+                                            .appendingPathComponent(name), home: environment.home))
+            guard manager.fileExists(atPath: legacy.path) else { continue }
+            if legacy.path == utilityTarget(descriptor, environment: environment).path { continue }
+            let destination = backup.appendingPathComponent(UUID().uuidString + ".py")
+            try manager.createDirectory(at: backup, withIntermediateDirectories: true)
+            try manager.moveItem(at: legacy, to: destination)
+        }
+    }
+
+    static func uninstall(_ descriptor: PluginDescriptor,
+                          environment: PluginEnvironment = .current) throws {
+        lock.lock()
+        defer { lock.unlock() }
+        try withFileLock(environment) {
+            let manager = FileManager.default
+            let record = state(descriptor.id, environment: environment)
+            let backup = environment.stateDirectory(descriptor.id)
+                .appendingPathComponent("backups", isDirectory: true)
+                .appendingPathComponent("uninstall-" + timestamp(), isDirectory: true)
+            var targets: [URL] = []
+            if let record {
+                for file in record.files {
+                    targets.append(try checkedPath(home: environment.home, relative: file.target))
+                }
+            } else {
+                targets.append(utilityTarget(descriptor, environment: environment))
+                for name in descriptor.legacyNames ?? [] {
+                    targets.append(environment.utilityDirectory.appendingPathComponent(name))
+                }
+            }
+            for target in targets {
+                guard manager.fileExists(atPath: target.path) else { continue }
+                if let record, let saved = record.files.first(where: {
+                    environment.home.appendingPathComponent($0.target).standardizedFileURL
+                        == target.standardizedFileURL
+                }), let data = try? Data(contentsOf: target),
+                   PluginProtocol.digest(data) != saved.sha256 {
+                    try manager.createDirectory(at: backup, withIntermediateDirectories: true)
+                    try data.write(to: backup.appendingPathComponent(
+                        UUID().uuidString + "-" + target.lastPathComponent), options: .atomic)
+                }
+                try manager.removeItem(at: target)
+            }
+            let stateDirectory = environment.stateDirectory(descriptor.id)
+            try? manager.removeItem(at: stateDirectory)
+            // Remove now-empty plugin-owned subdirectories (for example
+            // extension/) without touching anything the user added.
+            if let support = supportDirectory(descriptor, environment: environment) {
+                let directories = Set(targets.filter { $0.path.hasPrefix(support.path + "/") }
+                    .map { $0.deletingLastPathComponent() })
+                for directory in directories.sorted(by: { $0.path.count > $1.path.count }) {
+                    if let contents = try? manager.contentsOfDirectory(atPath: directory.path),
+                       contents.isEmpty {
+                        try? manager.removeItem(at: directory)
+                    }
+                }
+            }
+            // Keep the support directory when the user has data in it.
+            if let support = supportDirectory(descriptor, environment: environment),
+               let contents = try? manager.contentsOfDirectory(atPath: support.path),
+               contents.isEmpty {
+                try? manager.removeItem(at: support)
+            }
+        }
+    }
+
+    // Files this client manages, so a user script with the same name is not
+    // offered as a separate importable script.
+    static func managedNames(environment: PluginEnvironment = .current) -> Set<String> {
+        var names: Set<String> = []
+        guard let entries = try? FileManager.default.contentsOfDirectory(
+            at: environment.supportRoot, includingPropertiesForKeys: nil) else { return names }
+        for directory in entries {
+            let id = directory.lastPathComponent
+            guard let record = state(id, environment: environment) else { continue }
+            for file in record.files where file.role == PluginFileRole.utilityScript.rawValue {
+                names.insert((file.target as NSString).lastPathComponent)
+            }
+            names.formUnion(record.descriptor.legacyNames ?? [])
+        }
+        return names
+    }
+
+    static func supportDirectory(_ descriptor: PluginDescriptor,
+                                 environment: PluginEnvironment) -> URL? {
+        // A missing name falls back to the plugin id, which is already
+        // restricted to a single safe path component.
+        let name = descriptor.supportDirectoryName ?? descriptor.id
+        guard PluginProtocol.validSupportName(name) else { return nil }
+        return environment.home.appendingPathComponent("Library/Application Support", isDirectory: true)
+            .appendingPathComponent(name, isDirectory: true)
+    }
+
+    static func extensionDirectory(_ descriptor: PluginDescriptor,
+                                   environment: PluginEnvironment = .current) -> URL? {
+        supportDirectory(descriptor, environment: environment)?
+            .appendingPathComponent("extension", isDirectory: true)
+    }
+
+    static func utilityTarget(_ descriptor: PluginDescriptor,
+                              environment: PluginEnvironment) -> URL {
+        let name = descriptor.utilityScript ?? "\(descriptor.name).py"
+        return environment.utilityDirectory.appendingPathComponent(name)
+    }
+
+    private static func plannedFiles(_ release: PluginRelease, files: [String: Data],
+                                     environment: PluginEnvironment) throws -> [PlannedFile] {
+        let descriptor = release.descriptor
+        // Re-check the signed inventory even though the download layer already
+        // did: the installer must never write bytes it cannot attribute.
+        for item in release.files {
+            guard let data = files[item.path], data.count == item.size,
+                  PluginProtocol.digest(data) == item.sha256 else {
+                throw PluginProtocol.Failure.corrupted
+            }
+        }
+        var result: [PlannedFile] = []
+        let nativeHost = descriptor.nativeMessagingHost
+            ?? release.files.first(where: { $0.role == .nativeMessagingHost })?.path
+        for item in release.files {
+            guard let data = files[item.path] else { throw Failure.missingSupport(item.path) }
+            switch item.role {
+            case .metadata:
+                continue
+            case .utilityScript:
+                let name = item.installName ?? (item.path as NSString).lastPathComponent
+                guard PluginProtocol.validInstallName(name) else { throw Failure.writeFailed(item.path) }
+                result.append(PlannedFile(
+                    relative: relative(environment.utilityDirectory.appendingPathComponent(name),
+                                       home: environment.home),
+                    data: data, executable: item.executable ?? false, role: item.role))
+            case .support, .nativeMessagingHost, .extension:
+                guard let support = supportDirectory(descriptor, environment: environment) else {
+                    throw Failure.writeFailed(item.path)
+                }
+                result.append(PlannedFile(
+                    relative: relative(support.appendingPathComponent(item.path),
+                                       home: environment.home),
+                    data: data, executable: item.executable ?? false, role: item.role))
+            case .nativeMessagingManifest:
+                guard descriptor.capabilities.contains(.chromeNativeMessagingHost) else {
+                    throw Failure.writeFailed(item.path)
+                }
+                guard let host = nativeHost,
+                      let support = supportDirectory(descriptor, environment: environment)
+                else { throw Failure.invalidManifest }
+                let hostURL = support.appendingPathComponent(host)
+                let generated = try generatedManifest(template: data, descriptor: descriptor,
+                                                      host: hostURL)
+                let name = item.installName ?? (item.path as NSString).lastPathComponent
+                guard PluginProtocol.validInstallName(name) else { throw Failure.invalidManifest }
+                result.append(PlannedFile(
+                    relative: relative(environment.chromeDirectory.appendingPathComponent(name),
+                                       home: environment.home),
+                    data: generated, executable: false, role: item.role))
+            }
+        }
+        return result
+    }
+
+    private static func generatedManifest(template: Data, descriptor: PluginDescriptor,
+                                          host: URL) throws -> Data {
+        guard let object = try? JSONSerialization.jsonObject(with: template) as? [String: Any],
+              let name = object["name"] as? String, !name.isEmpty,
+              let origins = object["allowed_origins"] as? [String], !origins.isEmpty,
+              origins.allSatisfy({ $0.hasPrefix("chrome-extension://") && $0.hasSuffix("/") })
+        else { throw Failure.invalidManifest }
+        let payload: [String: Any] = [
+            "name": name,
+            "description": object["description"] as? String ?? descriptor.name,
+            "type": "stdio",
+            "path": host.path,
+            "allowed_origins": origins,
+        ]
+        guard let data = try? JSONSerialization.data(withJSONObject: payload,
+                                                     options: [.sortedKeys, .prettyPrinted]) else {
+            throw Failure.invalidManifest
+        }
+        return data
+    }
+
+    private static func legacyMarker(_ descriptor: PluginDescriptor,
+                                     environment: PluginEnvironment) -> (path: String, version: String?)? {
+        guard let support = supportDirectory(descriptor, environment: environment) else { return nil }
+        let marker = support.appendingPathComponent("installed.json")
+        guard let data = try? Data(contentsOf: marker),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              object["id"] as? String == descriptor.id else { return nil }
+        return (relative(marker, home: environment.home), object["version"] as? String)
+    }
+
+    private static func timestamp() -> String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyyMMdd-HHmmss"
+        return formatter.string(from: Date()) + "-" + String(UUID().uuidString.prefix(8))
+    }
+
+    private static func relative(_ url: URL, home: URL) -> String {
+        let base = home.standardizedFileURL.path
+        let path = url.standardizedFileURL.path
+        guard path.hasPrefix(base + "/") else { return path }
+        return String(path.dropFirst(base.count + 1))
+    }
+
+    // Reject links anywhere below home, including dangling ones; only metadata
+    // is read here.
+    private static func checkedPath(home: URL, relative: String) throws -> URL {
+        var url = home
+        for component in relative.split(separator: "/") {
+            url.appendPathComponent(String(component))
+            if (try? FileManager.default.destinationOfSymbolicLink(atPath: url.path)) != nil {
+                throw Failure.linkedPath
+            }
+        }
+        return url
+    }
+
+    private static func withFileLock<T>(_ environment: PluginEnvironment,
+                                        _ body: () throws -> T) throws -> T {
+        let manager = FileManager.default
+        try manager.createDirectory(at: environment.supportRoot, withIntermediateDirectories: true)
+        let path = environment.supportRoot.appendingPathComponent(".lock").path
+        let descriptor = open(path, O_CREAT | O_RDWR, 0o600)
+        guard descriptor >= 0 else { throw Failure.writeFailed(".lock") }
+        defer { close(descriptor) }
+        guard flock(descriptor, LOCK_EX) == 0 else { throw Failure.writeFailed(".lock") }
+        defer { flock(descriptor, LOCK_UN) }
+        return try body()
+    }
+}

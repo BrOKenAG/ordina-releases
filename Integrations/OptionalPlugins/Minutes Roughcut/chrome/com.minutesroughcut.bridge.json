@@ -1,0 +1,8 @@
+{
+  "name": "com.minutesroughcut.bridge",
+  "description": "Minutes Roughcut",
+  "type": "stdio",
+  "allowed_origins": [
+    "chrome-extension://kfoaocnjgbklmpekohmmloidfaeiggld/"
+  ]
+}

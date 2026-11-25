@@ -40,7 +40,7 @@
 | 项目目录 | 自定义文件夹模板、记住保存位置，支持本地磁盘、外置盘和已挂载 NAS |
 | Resolve 工程 | 支持已登记的本地及 PostgreSQL 项目库，保存工程关联，按关联打开工程 |
 | 全部项目 | 查看项目目录，打开文件夹或已关联的 Resolve 工程 |
-| 插件管理 | 查看已安装脚本，安装内置插件，拖入或选择 `.py` 脚本安装到 Resolve，检查并更新在线插件 |
+| 插件管理 | 从签名插件 Registry 动态发现插件，安装、更新、卸载内置与在线插件，也支持拖入或选择 `.py` 脚本安装到 Resolve |
 | 素材归档 | 登记原始素材位置，扫描临时素材，复制、校验后更新 Resolve 引用 |
 | 软件更新 | 在设置或应用菜单检查更新，可选择自动检查，更新包与清单均校验签名 |
 
@@ -55,11 +55,13 @@
 
 在「设置 → 插件管理」安装或更新。安装后从 Resolve 的「工作区 → 脚本 → Utility」打开；菜单未刷新时重启 Resolve。Import YueLiu 需要在 Resolve 使用的 Python 环境中安装 `openpyxl`。Minutes Roughcut 还包含浏览器扩展，安装方式见下节。
 
+插件列表来自签名 Registry，不在客户端里写死：新增插件只需发布插件仓库并更新 Registry，已发布的 ordina 会自动发现、展示、安装和更新，不需要重新编译或重新发布客户端。协议字段与发布流程见 [docs/plugin-distribution.md](docs/plugin-distribution.md)。
+
 ### Minutes Roughcut
 
 Minutes Roughcut 把飞书妙记页面上的划稿保留区间发送到 DaVinci Resolve，按区间生成粗剪时间线。它由 Resolve 脚本、Chrome 扩展和本地通信组件三部分组成。
 
-**安装**：在「设置 → 插件管理」安装 Minutes Roughcut，然后点「一键准备浏览器扩展」。ordina 会复制扩展文件夹路径、在 Chrome 中打开扩展程序页面，并在访达中选中该文件夹。接着在 Chrome 里开启「开发者模式」，选择「加载已解压的扩展程序」，按 ⌘⇧G 粘贴已复制的路径。Chrome 不允许第三方应用静默安装未上架的扩展，这两步无法省略。
+**安装**：在「设置 → 插件管理」安装 Minutes Roughcut，然后点「准备浏览器扩展」。ordina 会复制扩展文件夹路径、在 Chrome 中打开扩展程序页面，并在访达中选中该文件夹。接着在 Chrome 里开启「开发者模式」，选择「加载已解压的扩展程序」，按 ⌘⇧G 粘贴已复制的路径。Chrome 不允许第三方应用静默安装未上架的扩展，这两步无法省略。
 
 **使用**：打开飞书妙记页面，在扩展中点「发送到达芬奇」，把保留区间直接发送给已打开的 Resolve 项目；也可以导出 JSON，再从 Resolve 的「工作区 → 脚本 → Minutes Roughcut」导入。需要 macOS、Chrome 和 DaVinci Resolve Studio；浏览器直连时 Resolve 需已打开工程。
 

@@ -27,13 +27,15 @@ from pathlib import Path
 from urllib.parse import quote
 
 from feed_signing import envelope_bytes, verify_envelope
+import plugin_protocol as protocol
 
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE = ROOT / 'plugins' / 'registry.source.json'
 REGISTRY_OUTPUT = ROOT / 'registry.json'
 LEGACY_OUTPUT = ROOT / 'plugins' / 'manifest.json'
 REQUIRED = ('repository', 'feed', 'downloadPrefix', 'kind', 'asset',
-            'version', 'sha256', 'size')
+            'version', 'sha256', 'size', 'name', 'summary', 'symbol',
+            'minClientVersion', 'capabilities')
 
 
 def load_source(path=SOURCE):
@@ -63,14 +65,49 @@ def entry(name, meta):
     return result
 
 
+def registry_descriptor(name, meta):
+    """Presentation fields the client needs before fetching a full manifest."""
+    value = protocol.descriptor(name, meta)
+    return {
+        'repository': meta['repository'],
+        'feed': meta['feed'],
+        'downloadPrefix': meta['downloadPrefix'],
+        'kind': 'bundle' if meta['kind'] == 'bundle' else 'script',
+        'name': value['name'],
+        'summary': value['summary'],
+        'symbol': value['symbol'],
+        'version': value['version'],
+        'minClientVersion': value['minClientVersion'],
+        'protocol': value['protocol'],
+        'capabilities': value['capabilities'],
+    }
+
+
+def manifest_entry(name, meta):
+    """Signed per-plugin entry with the complete descriptor and file inventory."""
+    value = entry(name, meta)
+    value['size'] = meta['size']
+    if meta['kind'] == 'bundle':
+        files = meta.get('files') or []
+    else:
+        files = [{
+            'path': meta['asset'],
+            'sha256': meta['sha256'],
+            'size': meta['size'],
+            'role': 'utilityScript',
+            'installName': meta.get('installName') or meta['asset'],
+        }]
+    value['descriptor'] = protocol.descriptor(name, meta, files=files)
+    value['files'] = [dict(item) for item in files]
+    protocol.validate_manifest_entry(name, value)
+    return value
+
+
 def documents(plugins):
     live = published(plugins)
     registry = {
         'format': 2,
-        'plugins': {
-            name: {key: meta[key] for key in ('repository', 'feed', 'downloadPrefix', 'kind')}
-            for name, meta in live.items()
-        },
+        'plugins': {name: registry_descriptor(name, meta) for name, meta in live.items()},
     }
     entries = {name: entry(name, meta) for name, meta in live.items()}
     # Freeze legacy entries at versions that exist in the original release
@@ -83,7 +120,8 @@ def documents(plugins):
         legacy_meta = dict(meta, **old, repository='BrOKenAG/ordina-releases')
         legacy_entries[name] = entry(name, legacy_meta)
     legacy = {'format': 1, 'plugins': legacy_entries}
-    per_plugin = {name: {'format': 1, 'plugins': {name: entries[name]}} for name in live}
+    per_plugin = {name: {'format': 1, 'plugins': {name: manifest_entry(name, live[name])}}
+                  for name in live}
     return registry, legacy, per_plugin
 
 

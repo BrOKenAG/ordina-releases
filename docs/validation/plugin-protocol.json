@@ -1,0 +1,72 @@
+{
+  "format": 1,
+  "passed": true,
+  "clientVersion": "1.9.6",
+  "compiledOnce": true,
+  "harnessSha256": "d621d85b8093c607cc7bdb25ec50bcd5d0ac7406800206c4ffcfecfcd9306d0c",
+  "checks": {
+    "discovery": "pass",
+    "install_new_plugin": "pass",
+    "update_new_plugin": "pass",
+    "uninstall_new_plugin": "pass",
+    "offline_cache": "pass",
+    "registry_unavailable": "pass",
+    "bad_signature": "pass",
+    "corrupt_asset": "pass",
+    "incompatible_client": "pass",
+    "interrupted_install": "pass",
+    "regression_minutes": "pass",
+    "regression_multicam": "pass",
+    "regression_yueliu": "pass"
+  },
+  "details": {
+    "discovery": {
+      "items": [
+        "demo-notes",
+        "minutes",
+        "multicam",
+        "yueliu"
+      ]
+    },
+    "install_new_plugin": {
+      "installedFiles": 6
+    },
+    "update_new_plugin": {
+      "backups": 4
+    },
+    "uninstall_new_plugin": {
+      "userDataKept": true
+    },
+    "offline_cache": {
+      "cached": true
+    },
+    "registry_unavailable": {
+      "error": "无法获取插件目录：无法获取插件目录。"
+    },
+    "bad_signature": {
+      "error": "无法获取插件目录：插件清单校验失败。"
+    },
+    "corrupt_asset": {
+      "error": "插件文件校验失败。"
+    },
+    "incompatible_client": {
+      "required": "2.0.0"
+    },
+    "interrupted_install": {
+      "rolledBack": true,
+      "retry": "ok"
+    },
+    "regression_minutes": {
+      "files": 12,
+      "migrated": true
+    },
+    "regression_multicam": {
+      "files": 1
+    },
+    "regression_yueliu": {
+      "migrated": true,
+      "backups": 1
+    }
+  },
+  "timestamp": "2026-11-25T07:07:31Z"
+}

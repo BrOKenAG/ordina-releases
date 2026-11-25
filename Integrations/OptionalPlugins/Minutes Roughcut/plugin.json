@@ -1,11 +1,37 @@
 {
   "id": "minutes",
   "name": "Minutes Roughcut",
-  "version": "0.2.0",
-  "components": [
-    "Minutes Roughcut.py",
-    "host.py",
-    "host.command",
-    "extension/manifest.json"
-  ]
+  "version": "0.3.0",
+  "summary": "将飞书妙记划稿发送至 Resolve",
+  "symbol": "text.badge.plus",
+  "minClientVersion": "1.9.6",
+  "protocol": 2,
+  "capabilities": [
+    "resolve.utilityScript",
+    "resolve.support",
+    "chrome.nativeMessagingHost",
+    "chrome.unpackedExtension"
+  ],
+  "supportDirectoryName": "Minutes Roughcut",
+  "nativeMessagingHost": "host.command",
+  "files": {
+    "Minutes Roughcut.py": {
+      "role": "utilityScript",
+      "installName": "Minutes Roughcut.py"
+    },
+    "host.py": {
+      "role": "support"
+    },
+    "host.command": {
+      "role": "nativeMessagingHost",
+      "executable": true
+    },
+    "extension/manifest.json": {
+      "role": "extension"
+    },
+    "chrome/com.minutesroughcut.bridge.json": {
+      "role": "nativeMessagingManifest",
+      "installName": "com.minutesroughcut.bridge.json"
+    }
+  }
 }

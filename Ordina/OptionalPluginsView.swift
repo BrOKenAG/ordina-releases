@@ -3,112 +3,105 @@ import AppKit
 import UniformTypeIdentifiers
 import Darwin
 
-// Convert the shared installer's status inside the worker. Only this explicitly
-// Sendable value crosses the detached-task boundary in Swift 5 mode.
-private enum OptionalPluginStatus: Equatable, Sendable {
-    case checking, current, missing, outdated, unavailable
+// The plugin centre renders whatever the signed registry describes. There is
+// no per-plugin branch here: a new plugin appears with its own name, summary,
+// icon and capabilities without changing or rebuilding this file.
+private enum PluginRowStatus: Equatable, Sendable {
+    case loading, current, missing, outdated, unmanaged, incompatible
 
     var title: String {
         switch self {
-        case .checking: return "检查中…"
+        case .loading: return "检查中…"
         case .current: return "已安装"
         case .missing: return "未安装"
         case .outdated: return "可更新"
-        case .unavailable: return "不可用"
+        case .unmanaged: return "已安装（未托管）"
+        case .incompatible: return "需更新 ordina"
         }
     }
 }
 
-private struct OptionalPluginRowState: Sendable {
-    var status: OptionalPluginStatus = .checking
+private struct PluginRowState: Sendable {
+    var status: PluginRowStatus = .loading
     var error: String?
     var installing = false
-    var remoteEntry: PluginUpdates.Entry?
 
     var buttonTitle: String {
-        if status == .unavailable { return "重试" }
         switch status {
         case .current: return "重新安装"
         case .outdated: return "更新"
+        case .unmanaged: return "接管"
         default: return "安装"
         }
     }
+
+    var canAct: Bool {
+        status == .missing || status == .outdated || status == .unmanaged || status == .current
+    }
 }
 
-private enum OptionalPluginWorker {
-    static func inspect(_ plugin: OptionalPlugin) -> OptionalPluginRowState {
-        do {
-            let status: OptionalPluginStatus
-            switch try OptionalPluginInstaller.inspect(plugin) {
-            case .current: status = .current
-            case .missing: status = .missing
-            case .outdated: status = .outdated
+@MainActor
+private final class PluginCenterModel: ObservableObject {
+    @Published var items: [PluginCatalog.Item] = []
+    @Published var rows: [String: PluginRowState] = [:]
+    @Published var loadError: String?
+    @Published var loading = false
+    private var requests: [String: UUID] = [:]
+
+    func load(silent: Bool = false) async {
+        if !silent { loading = true }
+        let result = await Task.detached(priority: .utility) {
+            PluginOperations.load()
+        }.value
+        items = result.items
+        loadError = result.registryError
+        for item in result.items where rows[item.id]?.installing != true {
+            rows[item.id] = PluginRowState(status: Self.status(item.status), error: item.error)
+        }
+        loading = false
+    }
+
+    func perform(_ item: PluginCatalog.Item, action: @escaping @Sendable () throws -> Void,
+                 onSuccess: (() -> Void)? = nil) {
+        guard rows[item.id]?.installing != true else { return }
+        var pending = rows[item.id] ?? PluginRowState()
+        pending.installing = true
+        pending.error = nil
+        rows[item.id] = pending
+        let request = UUID()
+        requests[item.id] = request
+        Task { @MainActor in
+            let error: String? = await Task.detached(priority: .utility) {
+                do { try action(); return nil }
+                catch { return error.localizedDescription }
+            }.value
+            guard requests[item.id] == request else { return }
+            requests[item.id] = nil
+            await load(silent: true)
+            if let error {
+                var failed = rows[item.id] ?? PluginRowState()
+                failed.installing = false
+                failed.error = error
+                failed.status = .unmanaged
+                rows[item.id] = failed
+            } else {
+                rows[item.id]?.installing = false
+                onSuccess?()
             }
-            var result = OptionalPluginRowState(status: status)
-            do {
-                let entry = try PluginUpdates.fetch(plugin)
-                let reference: String?
-                if plugin == .minutes {
-                    let versions = try OptionalPluginInstaller.minutesVersions()
-                    reference = [versions.installed, versions.bundled].compactMap { $0 }
-                        .max { PluginUpdates.newer($1, than: $0) }
-                } else {
-                    let target = try OptionalPluginInstaller.scriptDirectory().appendingPathComponent(plugin.filename)
-                    let installed = (try? Data(contentsOf: target)).flatMap(PluginUpdates.version)
-                    let bundled = Bundle.main.url(forResource: plugin.resourceName, withExtension: "py")
-                        .flatMap { try? Data(contentsOf: $0) }.flatMap(PluginUpdates.version)
-                    reference = [installed, bundled].compactMap { $0 }.max { PluginUpdates.newer($1, than: $0) }
-                }
-                if let reference, PluginUpdates.newer(entry.version, than: reference) {
-                    result.remoteEntry = entry
-                    if status != .missing { result.status = .outdated }
-                }
-            } catch PluginUpdates.Failure.notPublished {
-                // Plugins without an online release continue using their bundled copy.
-            } catch {
-                // Offline installs still use the signed app's bundled copy.
-                result.error = "无法检查在线更新"
-            }
-            return result
-        } catch {
-            return OptionalPluginRowState(status: .unavailable, error: error.localizedDescription)
         }
     }
 
-    static func install(_ plugin: OptionalPlugin, entry: PluginUpdates.Entry?) -> OptionalPluginRowState {
-        do {
-            if let entry {
-                // Re-check the signed manifest before downloading, and never overwrite a newer local version.
-                let current = try PluginUpdates.fetch(plugin)
-                guard current.version == entry.version, current.sha256 == entry.sha256, current.url == entry.url else {
-                    throw PluginUpdates.Failure.invalid
-                }
-                if current.isBundle {
-                    let directory = try PluginUpdates.bundle(current, plugin: plugin)
-                    defer { try? FileManager.default.removeItem(at: directory) }
-                    if let installed = try? OptionalPluginInstaller.minutesVersions().installed,
-                       PluginUpdates.newer(installed, than: current.version) { return inspect(plugin) }
-                    try OptionalPluginInstaller.install(plugin, source: directory)
-                } else {
-                    let data = try PluginUpdates.script(current)
-                    let target = try OptionalPluginInstaller.scriptDirectory().appendingPathComponent(plugin.filename)
-                    if let local = (try? Data(contentsOf: target)).flatMap(PluginUpdates.version),
-                       PluginUpdates.newer(local, than: current.version) { return inspect(plugin) }
-                    let temporary = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-                    try FileManager.default.createDirectory(at: temporary, withIntermediateDirectories: true)
-                    defer { try? FileManager.default.removeItem(at: temporary) }
-                    let source = temporary.appendingPathComponent(plugin.filename)
-                    try data.write(to: source, options: .atomic)
-                    try OptionalPluginInstaller.install(plugin, source: source)
-                }
-            } else {
-                try OptionalPluginInstaller.install(plugin)
-            }
-            return inspect(plugin)
-        } catch {
-            var result = OptionalPluginRowState(status: .unavailable)
-            result.error = "更新失败：\(error.localizedDescription)"
-            return result
+    func clearError(_ id: String) {
+        rows[id]?.error = nil
+    }
+
+    static func status(_ value: PluginInstallStatus) -> PluginRowStatus {
+        switch value {
+        case .current: return .current
+        case .updateAvailable: return .outdated
+        case .unmanaged: return .unmanaged
+        case .incompatible: return .incompatible
+        case .notInstalled: return .missing
         }
     }
 }
@@ -118,77 +111,96 @@ struct OptionalPluginsView: View {
     var inManager = false
     var refreshRevision = 0
     @State private var expanded = false
-    @State private var rows: [OptionalPlugin: OptionalPluginRowState] = [:]
-    @State private var requests: [OptionalPlugin: UUID] = [:]
+    @StateObject private var model = PluginCenterModel()
 
     var body: some View {
         if inManager {
             pluginRows
-                .task(id: refreshRevision) {
-                    for plugin in OptionalPlugin.allCases { await refresh(plugin, silent: rows[plugin] != nil) }
-                }
+                .task(id: refreshRevision) { await model.load() }
         } else {
             DisclosureGroup("更多插件", isExpanded: $expanded) {
                 pluginRows.padding(.top, 10)
             }
             .task(id: expanded) {
                 guard expanded else { return }
-                for plugin in OptionalPlugin.allCases { await refresh(plugin) }
+                await model.load()
             }
         }
     }
 
     private var pluginRows: some View {
         VStack(alignment: .leading, spacing: inManager ? 0 : 12) {
-            ForEach(OptionalPlugin.allCases) { plugin in
-                row(plugin, state: rows[plugin] ?? OptionalPluginRowState())
+            if let error = model.loadError {
+                Text(error)
+                    .font(OrdinaTokens.type(12))
+                    .foregroundStyle(OrdinaTokens.error)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            if model.items.isEmpty && model.loading {
+                HStack(spacing: 10) {
+                    ProgressView().controlSize(.small)
+                    Text("正在读取插件目录…")
+                        .font(OrdinaTokens.type(12)).foregroundStyle(OrdinaTokens.secondary)
+                }
+                .frame(minHeight: 44)
+            } else if model.items.isEmpty && model.loadError == nil {
+                Text("暂无可用插件。")
+                    .font(OrdinaTokens.type(12)).foregroundStyle(OrdinaTokens.secondary)
+                    .frame(minHeight: 44)
+            }
+            ForEach(model.items) { item in
+                row(item, state: model.rows[item.id] ?? PluginRowState())
                 if inManager { PaperRule() }
             }
         }
     }
 
-    private func row(_ plugin: OptionalPlugin, state: OptionalPluginRowState) -> some View {
+    private func row(_ item: PluginCatalog.Item, state: PluginRowState) -> some View {
         VStack(alignment: .leading, spacing: OrdinaTokens.space(6)) {
             HStack(spacing: OrdinaTokens.space(12)) {
                 if inManager {
-                    ResolvePluginLabel(title: plugin.name,
-                                       summary: plugin == .yueliu ? "导入阅流审片意见" : (plugin == .minutes ? "将飞书妙记划稿发送至 Resolve" : "批量命名机位，创建多机位片段"),
-                                       symbol: plugin == .yueliu ? "text.bubble" : (plugin == .minutes ? "text.badge.plus" : "video"))
-                        .help(plugin.dependencyHint ?? plugin.name)
+                    ResolvePluginLabel(title: item.name, summary: item.summary, symbol: item.symbol)
                 } else {
-                    pluginName(plugin)
+                    Text(item.name).font(OrdinaTokens.type(14))
+                        .help(item.summary)
                 }
                 Spacer(minLength: OrdinaTokens.space(8))
                 if state.installing {
                     ProgressView().controlSize(.small).tint(OrdinaTokens.accent)
-                        .accessibilityLabel("正在安装 \(plugin.name)")
+                        .accessibilityLabel("正在安装 \(item.name)")
                 }
                 Text(state.installing ? "安装中…" : state.status.title)
                     .font(OrdinaTokens.type(12))
-                    .foregroundStyle(state.status == .current && !state.installing ? OrdinaTokens.success : OrdinaTokens.secondary)
-                if inManager && state.status == .missing && state.error == nil && !state.installing {
-                    Button { performAction(plugin) } label: { Image(systemName: "plus") }
-                        .buttonStyle(PaperQuietButton()).help("安装").accessibilityLabel("安装 " + plugin.name)
-                } else if inManager && state.status == .current && state.error == nil && !state.installing {
+                    .foregroundStyle(state.status == .current && !state.installing
+                                     ? OrdinaTokens.success : OrdinaTokens.secondary)
+                if state.status == .incompatible {
+                    Text("≥ \(item.minClientVersion)")
+                        .font(OrdinaTokens.type(11))
+                        .foregroundStyle(OrdinaTokens.secondary)
+                } else if inManager && state.status == .missing && !state.installing {
+                    Button { install(item) } label: { Image(systemName: "plus") }
+                        .buttonStyle(PaperQuietButton()).help("安装")
+                        .accessibilityLabel("安装 " + item.name)
+                        .disabled(!item.canInstall || state.error != nil)
+                } else if inManager && state.status == .current && !state.installing {
                     Menu {
-                        Button("在 Finder 中显示") {
-                            if let directory = try? OptionalPluginInstaller.scriptDirectory() {
-                                NSWorkspace.shared.activateFileViewerSelecting([directory.appendingPathComponent(plugin.filename)])
-                            }
+                        Button("在 Finder 中显示") { reveal(item) }
+                        if item.needsBrowserExtension {
+                            Button("准备浏览器扩展") { prepareBrowserExtension(item) }
                         }
-                        if plugin == .minutes {
-                            Button("一键准备浏览器扩展") { prepareMinutesChrome() }
-                        }
-                        Button("重新安装") { performAction(plugin) }
+                        Button("重新安装") { install(item) }
+                        Divider()
+                        Button("卸载…") { confirmUninstall(item) }
                     } label: { Image(systemName: "ellipsis").frame(width: 28, height: 28) }
                     .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
-                    .accessibilityLabel(plugin.name + " 操作")
-                } else if !inManager || (!state.installing && state.status != .checking) {
-                    Button(state.buttonTitle) { performAction(plugin) }
+                    .accessibilityLabel(item.name + " 操作")
+                } else if !inManager || (!state.installing && state.status != .loading) {
+                    Button(state.buttonTitle) { install(item) }
                         .buttonStyle(PaperButtonStyle(compact: true))
                         .frame(minHeight: OrdinaTokens.height(36))
-                        .disabled(state.installing || state.status == .checking)
-                        .accessibilityLabel("\(state.buttonTitle) \(plugin.name)")
+                        .disabled(state.installing || state.status == .loading
+                                  || state.status == .incompatible || state.error != nil)
+                        .accessibilityLabel("\(state.buttonTitle) \(item.name)")
                 }
             }
             if let error = state.error {
@@ -200,62 +212,67 @@ struct OptionalPluginsView: View {
         }
     }
 
-    @ViewBuilder
-    private func pluginName(_ plugin: OptionalPlugin) -> some View {
-        let label = Text(plugin.name).font(OrdinaTokens.type(14))
-        if let hint = plugin.dependencyHint {
-            label.help(hint)
-        } else {
-            label
-        }
+    private func install(_ item: PluginCatalog.Item) {
+        guard item.canInstall else { return }
+        model.clearError(item.id)
+        let wasMissing = model.rows[item.id]?.status != .current
+        model.perform(item, action: {
+            try PluginOperations.install(item)
+        }, onSuccess: {
+            if wasMissing && item.needsBrowserExtension {
+                prepareBrowserExtension(item)
+            }
+        })
     }
 
-    private func performAction(_ plugin: OptionalPlugin) {
-        let state = rows[plugin] ?? OptionalPluginRowState()
-        guard !state.installing, state.status != .checking else { return }
-        if state.status == .unavailable {
-            rows[plugin] = OptionalPluginRowState()
-            Task { @MainActor in await refresh(plugin) }
+    private func confirmUninstall(_ item: PluginCatalog.Item) {
+        let alert = NSAlert()
+        alert.messageText = "卸载 \(item.name)？"
+        alert.informativeText = "将移除插件写入的文件；用户数据和设置会保留。"
+        alert.addButton(withTitle: "卸载")
+        alert.addButton(withTitle: "取消")
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        model.perform(item, action: {
+            try PluginOperations.uninstall(item)
+        })
+    }
+
+    private func reveal(_ item: PluginCatalog.Item) {
+        let environment = PluginEnvironment.current
+        if let descriptor = item.descriptor,
+           let extensionDirectory = PluginInstaller.extensionDirectory(descriptor,
+                                                                       environment: environment),
+           FileManager.default.fileExists(atPath: extensionDirectory.path) {
+            NSWorkspace.shared.activateFileViewerSelecting([extensionDirectory])
             return
         }
-        var pending = state
-        pending.installing = true
-        pending.error = nil
-        rows[plugin] = pending
-        let wasMissing = state.status == .missing
-        let request = UUID()
-        requests[plugin] = request
-        Task { @MainActor in
-            let result = await Task.detached(priority: .utility) {
-                OptionalPluginWorker.install(plugin, entry: state.remoteEntry)
-            }.value
-            guard requests[plugin] == request else { return }
-            rows[plugin] = result
-            if plugin == .minutes && result.status == .current && result.error == nil && wasMissing {
-                prepareMinutesChrome()
+        if let descriptor = item.descriptor {
+            let target = PluginInstaller.utilityTarget(descriptor, environment: environment)
+            if FileManager.default.fileExists(atPath: target.path) {
+                NSWorkspace.shared.activateFileViewerSelecting([target])
+                return
             }
+            if let support = PluginInstaller.supportDirectory(descriptor, environment: environment),
+               FileManager.default.fileExists(atPath: support.path) {
+                NSWorkspace.shared.activateFileViewerSelecting([support])
+                return
+            }
+        }
+        if let directory = try? OptionalPluginInstaller.scriptDirectory() {
+            NSWorkspace.shared.activateFileViewerSelecting([directory])
         }
     }
 
     // Chrome blocks every silent install path for unpacked extensions. One tap
     // still does everything ordina can: copy the path, open the extensions page
     // in Chrome itself, and reveal the folder for drag-and-drop.
-    private func prepareMinutesChrome() {
-        let directory: URL
-        do {
-            directory = try OptionalPluginInstaller.minutesExtensionDirectory()
-        } catch {
+    private func prepareBrowserExtension(_ item: PluginCatalog.Item) {
+        guard let descriptor = item.descriptor,
+              let directory = PluginInstaller.extensionDirectory(descriptor),
+              FileManager.default.fileExists(atPath: directory.appendingPathComponent("manifest.json").path) else {
             let alert = NSAlert()
-            alert.messageText = "无法定位扩展文件夹"
-            alert.informativeText = error.localizedDescription
-            alert.addButton(withTitle: "好")
-            alert.runModal()
-            return
-        }
-        guard FileManager.default.fileExists(atPath: directory.appendingPathComponent("manifest.json").path) else {
-            let alert = NSAlert()
-            alert.messageText = "请先安装 Minutes Roughcut"
-            alert.informativeText = "扩展文件尚未安装到本机，请先在插件管理中完成安装。"
+            alert.messageText = "扩展文件尚未安装"
+            alert.informativeText = "请先在插件中心完成 \(item.name) 的安装。"
             alert.addButton(withTitle: "好")
             alert.runModal()
             return
@@ -277,27 +294,6 @@ struct OptionalPluginsView: View {
         alert.informativeText = "扩展文件夹已在 Finder 中选中，路径也已复制。\n\n1. 在刚打开的 Chrome 扩展程序页面右上角开启「开发者模式」。\n2. 点「加载已解压的扩展程序」，按 ⌘⇧G 粘贴已复制的路径并确认。\n\n也可以直接把 Finder 中选中的 extension 文件夹拖进页面。设置一次即可，之后更新插件无需重复。"
         alert.addButton(withTitle: "好")
         alert.runModal()
-    }
-
-    private func refresh(_ plugin: OptionalPlugin, silent: Bool = false) async {
-        guard rows[plugin]?.installing != true else { return }
-        let request = UUID()
-        requests[plugin] = request
-        if !silent { rows[plugin] = OptionalPluginRowState() }
-        Task { @MainActor in
-            try? await Task.sleep(for: .seconds(16))
-            guard requests[plugin] == request else { return }
-            requests[plugin] = nil
-            rows[plugin] = OptionalPluginRowState(status: .unavailable, error: "检查超时，请重试。")
-        }
-        let result = await Task.detached(priority: .utility) {
-            OptionalPluginWorker.inspect(plugin)
-        }.value
-        // An older inspection must not replace a newer install result, even
-        // when that install has already finished by the time we resume.
-        guard requests[plugin] == request else { return }
-        requests[plugin] = nil
-        rows[plugin] = result
     }
 }
 
