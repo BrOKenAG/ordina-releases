@@ -35,7 +35,7 @@ class PublishDevToolTests(unittest.TestCase):
 
     def test_rehearsal_writes_nothing(self):
         before = {
-            path: path.read_bytes()
+            path: path.read_bytes() if path.exists() else None
             for path in (ROOT / 'dev-tool' / 'manifest.json',
                          ROOT / 'dev-tool' / 'manifest.source.json',
                          ROOT / 'dist' / 'dev-tool' / 'ordina-publisher-1.0.0.pyz')
@@ -45,7 +45,8 @@ class PublishDevToolTests(unittest.TestCase):
         result = run()
         self.assertEqual(result.returncode, 0, result.stderr)
         for path, data in before.items():
-            self.assertEqual(path.read_bytes(), data, f'{path} 被预演改动')
+            actual = path.read_bytes() if path.exists() else None
+            self.assertEqual(actual, data, f'{path} 被预演改动')
         self.assertEqual(journals.exists(), existed, '预演创建了事务目录')
 
     def test_commands_never_bypass_the_transaction(self):

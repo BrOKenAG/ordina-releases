@@ -31,6 +31,7 @@ subprocess.run([sys.executable, '-B', '-m', 'unittest', 'discover', '-s', 'Tests
 checks = {
     'VerifyNaming': ['ResolveService'],
     'VerifyDestination': ['ResolveService', 'DestinationBookmark'],
+    'VerifyDeveloperTOTP': ['DeveloperTOTP'],
     'VerifyIntegration': ['ResolveService', 'IntegrationInstaller'],
     'VerifyPluginProtocol': ['PluginProtocol'],
     'VerifyPluginInstaller': ['PluginProtocol', 'PluginEnvironment', 'PluginInstaller'],
