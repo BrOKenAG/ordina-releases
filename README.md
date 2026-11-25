@@ -57,6 +57,8 @@
 
 插件列表来自签名 Registry，不在客户端里写死：新增插件只需发布插件仓库并更新 Registry，已发布的 ordina 会自动发现、展示、安装和更新，不需要重新编译或重新发布客户端。协议字段与发布流程见 [docs/plugin-distribution.md](docs/plugin-distribution.md)。
 
+发布插件不需要命令行：设置页的「测试选项」里有默认隐藏的开发者中心，拖入 ZIP 即可本地测试、预览并正式发布，发布引擎独立部署、可单独更新与回滚。使用说明与 ZIP 规范见 [docs/developer-center.md](docs/developer-center.md)。
+
 ### Minutes Roughcut
 
 Minutes Roughcut 把飞书妙记页面上的划稿保留区间发送到 DaVinci Resolve，按区间生成粗剪时间线。它由 Resolve 脚本、Chrome 扩展和本地通信组件三部分组成。
@@ -132,4 +134,4 @@ docs/                  发布流程、数据兼容与使用说明
 appcast.xml            已发布版本的签名更新清单
 ```
 
-发布更新与标准流程见 [发布说明](docs/releases.md)，插件仓库拓扑与签名注册表见 [插件分发架构](docs/plugin-distribution.md)。早期标识、数据文件和脚本兼容关系见 [数据兼容说明](docs/compatibility.md)。使用与数据处理说明见 [使用说明](docs/usage-notice.md)，第三方授权见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
+发布更新与标准流程见 [发布说明](docs/releases.md)，插件仓库拓扑与签名注册表见 [插件分发架构](docs/plugin-distribution.md)，插件发布工具见 [开发者中心](docs/developer-center.md)。早期标识、数据文件和脚本兼容关系见 [数据兼容说明](docs/compatibility.md)。使用与数据处理说明见 [使用说明](docs/usage-notice.md)，第三方授权见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。

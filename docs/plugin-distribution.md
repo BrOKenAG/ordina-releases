@@ -1,6 +1,6 @@
 # 插件分发架构
 
-> **阶段 B 已完成（本地检查点，未发布）。** 客户端不再枚举插件 id，也不再为某个插件写专用展示或安装分支。插件由**签名注册表 + 版本化插件描述协议**驱动：只要发布一个符合协议的插件并更新 registry，同一份已编译客户端就能发现、展示、安装、更新和卸载它。上线顺序见文末「正式上线计划」。
+> **阶段 B 已完成，阶段 C 已接入（均为本地检查点，未发布）。** 阶段 C 增加了「开发者中心 + 独立发布引擎」：拖入 ZIP 即可完成本地测试、预览与正式发布，流程见 [developer-center.md](developer-center.md)。协议本身没有变化。 客户端不再枚举插件 id，也不再为某个插件写专用展示或安装分支。插件由**签名注册表 + 版本化插件描述协议**驱动：只要发布一个符合协议的插件并更新 registry，同一份已编译客户端就能发现、展示、安装、更新和卸载它。上线顺序见文末「正式上线计划」。
 
 ## 仓库拓扑
 
@@ -163,6 +163,10 @@
 
 ## 新增插件流程（不需要重新编译客户端）
 
+**图形路径**：打开「开发者中心」→ 拖入 ZIP → 本地测试 → 填更新说明 → 预览 → 发布（详见 [developer-center.md](developer-center.md)）。ZIP 规范与限制表也在该文档里。
+
+**命令行路径**（CI 或应急）：
+
 1. 在插件源目录放 `plugin.json`，声明 `id` / `name` / `summary` / `symbol` / `version` / `minClientVersion` / `protocol: 2` / `capabilities` / `supportDirectoryName`（如需要）/ `nativeMessagingHost`（如需要）/ `files`（每个文件 role，`extension/` 下的文件可省略并自动归为 extension）。
 2. 预演：`python3 scripts/publish_plugin.py <id> --source <插件源目录> --dry-run`。
 3. 真实发布：`python3 scripts/publish_plugin.py <id> --source <插件源目录> --execute --lab-report docs/validation/lab-release.json`。发布事务会创建 Release、GATE 校验资产、把 `files` 写回唯一源、派生并推送 registry 与两份插件清单。
@@ -178,6 +182,7 @@
 | 1.9.5 | 各插件仓库 `manifest.json` | 是 |
 | 1.9.6 | `registry.json` → `manifest-v2.json`（只读兼容字段） | 是 |
 | 阶段 B 及以后 | `registry.json` → `manifest-v2.json`（`descriptor` + `files`） | **否** |
+| 1.10.0（阶段 C） | 同上，另加「开发者中心」 | **否** |
 
 旧客户端忽略 `descriptor` / `files` 等新增字段，因此服务端可以先升级清单与 registry，再发布新客户端。
 
@@ -199,3 +204,5 @@
 6. **回滚**：`registry.json`、兼容清单与各插件 `manifest-v2.json` 恢复到上一已知良好提交；**绝不删除 Release**。回滚后重跑 `check_feeds.py --remote`。
 
 验收记录见 `docs/validation/plugin-protocol.json`（13 项：发现、安装、更新、卸载、离线缓存、Registry 不可用、签名错误、资产损坏、版本不兼容、安装中断、三个现有插件回归）。
+
+阶段 C 的验收见 `docs/validation/developer-center.json`（26 项，含用真实客户端快照发现并安装一个客户端从未编译过的插件、事务中断后恢复、并发锁、工具独立更新与回滚）。

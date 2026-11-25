@@ -1,0 +1,136 @@
+{
+  "format": 1,
+  "passed": true,
+  "clientVersion": "1.10.0",
+  "compiledOnce": true,
+  "harnessSha256": "914e4d57ad4e5fad6874d51a2c8095fe1922204e9e75332b491129e00ce988ac",
+  "toolVersion": "1.1.0",
+  "toolProtocol": 1,
+  "checks": {
+    "tool_absent": "pass",
+    "tool_manifest": "pass",
+    "tool_install": "pass",
+    "tool_integrity": "pass",
+    "inspect_new": "pass",
+    "local_test": "pass",
+    "local_uninstall": "pass",
+    "preview": "pass",
+    "preview_stale": "pass",
+    "malicious_zip": "pass",
+    "zip_bomb": "pass",
+    "publish_new": "pass",
+    "client_discovers_new_plugin": "pass",
+    "publish_update": "pass",
+    "interrupted_publish": "pass",
+    "concurrent_blocked": "pass",
+    "pending_blocks_tool_update": "pass",
+    "resume_publish": "pass",
+    "tool_update": "pass",
+    "publish_after_tool_update": "pass",
+    "rollback_release": "pass",
+    "tool_rollback": "pass",
+    "unsigned_credential": "pass",
+    "wrong_scope": "pass",
+    "version_downgrade": "pass",
+    "records_preserved": "pass"
+  },
+  "details": {
+    "tool_absent": {
+      "installed": null
+    },
+    "tool_manifest": {
+      "versions": [
+        "1.0.0",
+        "1.1.0"
+      ]
+    },
+    "tool_install": {
+      "installed": "1.0.0"
+    },
+    "tool_integrity": {
+      "integrity": true,
+      "protocol": 1
+    },
+    "inspect_new": {
+      "action": "new",
+      "files": 4
+    },
+    "local_test": {
+      "installed": "1.0.0",
+      "registryUntouched": true
+    },
+    "local_uninstall": {
+      "uninstalled": true
+    },
+    "preview": {
+      "fingerprint": "6d2ec0dc47db",
+      "checks": 6
+    },
+    "preview_stale": {
+      "code": "preview.stale"
+    },
+    "malicious_zip": {
+      "code": "package.entry"
+    },
+    "zip_bomb": {
+      "code": "package.bomb"
+    },
+    "publish_new": {
+      "journal": "plugin-demo-lab-notes-v1-0-0-13c39d4be818d926d58c.json",
+      "stages": 6
+    },
+    "client_discovers_new_plugin": {
+      "discovered": true,
+      "installed": "1.0.0",
+      "uninstalled": true
+    },
+    "publish_update": {
+      "previous": "1.0.0",
+      "version": "1.1.0"
+    },
+    "interrupted_publish": {
+      "status": "publishing",
+      "journal": "plugin-demo-lab-notes-v1-2-0-2d015b25e64c1c11f0fc.json"
+    },
+    "concurrent_blocked": {
+      "code": "publish.failed",
+      "blocked": true
+    },
+    "pending_blocks_tool_update": {
+      "blocked": true
+    },
+    "resume_publish": {
+      "status": "complete",
+      "version": "1.2.0"
+    },
+    "tool_update": {
+      "from": "1.0.0",
+      "to": "1.1.0",
+      "journals": 3
+    },
+    "publish_after_tool_update": {
+      "version": "1.3.0"
+    },
+    "rollback_release": {
+      "status": "rolled_back",
+      "registryVersion": "1.2.0"
+    },
+    "tool_rollback": {
+      "installed": "1.0.0"
+    },
+    "unsigned_credential": {
+      "code": "auth.signature"
+    },
+    "wrong_scope": {
+      "code": "auth.scope"
+    },
+    "version_downgrade": {
+      "action": "downgrade"
+    },
+    "records_preserved": {
+      "records": 5,
+      "journals": 4
+    }
+  },
+  "timestamp": "2026-11-25T08:10:53Z"
+}

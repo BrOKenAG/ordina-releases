@@ -48,6 +48,8 @@ Install or update scripts from ordina's plugin manager. Open them from Resolve's
 
 The plugin list comes from a signed registry rather than being hardcoded in the app. Adding a plugin only requires publishing its repository and updating the registry: an already-shipped ordina discovers, displays, installs, and updates it without rebuilding or re-releasing the client. See [docs/plugin-distribution.md](docs/plugin-distribution.md) for the descriptor fields and release flow.
 
+Releasing a plugin needs no shell: a hidden developer centre in the test options accepts a ZIP, runs a local test, previews the exact changes and publishes through the durable transaction. The publishing engine is deployed separately from the app and can be updated and rolled back on its own. See [docs/developer-center.md](docs/developer-center.md).
+
 ## Minutes Roughcut
 
 Minutes Roughcut sends the ranges you keep in a Feishu Minutes transcript to DaVinci Resolve and builds a rough-cut timeline from them. It ships as a Resolve script, a Chrome extension, and a local messaging host.
@@ -82,6 +84,7 @@ The build script uses standard `xcodebuild` and must run from a local, non-sandb
 
 - [Build and release workflow](docs/releases.md) — standard Xcode build, transactional publishing, checks, retries and rollback.
 - [Plugin distribution architecture](docs/plugin-distribution.md) — per-plugin repositories, the signed registry and client compatibility.
+- [Developer centre](docs/developer-center.md) — the ZIP contract, the JSON publishing protocol and the independently versioned publishing tool.
 
 ## Feedback
 

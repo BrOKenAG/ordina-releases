@@ -208,3 +208,35 @@ python3 scripts/check_feeds.py --remote
 - 能力白名单只有 `resolve.utilityScript`、`resolve.support`、`chrome.nativeMessagingHost`、`chrome.unpackedExtension` 四项；descriptor 无法携带 shell 命令、绝对路径或任意目标路径，安装行为仍完全由客户端编译期逻辑决定。
 - 验收：`scripts/verify_plugin_protocol.py` 编译一份快照客户端，在 loopback 隔离环境发布客户端源码完全不认识的新插件 ID，完成发现/展示/安装/更新/卸载/回滚，并覆盖 Registry 不可用、签名错误、资产损坏、版本不兼容、安装中断；报告 [validation/plugin-protocol.json](validation/plugin-protocol.json) 全项 `pass`。
 - 新插件上线流程（无需重编译客户端）与新协议字段说明见 [plugin-distribution.md](plugin-distribution.md)。
+
+## 阶段 C 完成状态
+
+- **三条独立通道**：软件（`appcast.xml` + Sparkle）、插件（`registry.json` + 各插件 `manifest-v2.json`）、发布工具（`dev-tool/manifest.json` + `ordina-publisher-<版本>.pyz`）。三者版本号、签名清单、目录与回滚流程互不影响。
+- **开发者中心**（默认隐藏在设置页的「测试选项」里）：拖入 ZIP → 自动识别 → 本地测试 → 填写说明 → 预览（含指纹）→ 发布，复用阶段 A 的六阶段持久事务；另有事务管理、继续、回滚、工具更新与工具回滚。
+- **发布引擎独立部署**：Python zipapp，位于 `~/Library/Application Support/ordina/Developer/Publisher/versions/`，与客户端之间是版本化 JSON Lines 契约（`protocol: 1`），客户端不解析人类日志、不拼接 shell。
+- **凭据只走钥匙串**（`ordina-dev-publisher`），签名文档声明范围与仓库白名单，由引擎自己校验；仓库、日志、journal 与 JSON 输出都不含凭据内容。
+- **安全收口**：ZIP 适配层在写盘前拒绝穿越/符号链接/ZIP bomb/重复路径；预览指纹防止预览后偷换；参数化 GitHub API 防止仓库名注入；lab 注入改为编译期 `#if DEBUG || ORDINA_LAB`，Release 构建无法通过环境变量切换 Registry 或公钥；生产工具包不含隔离后端与实验室签名器。
+- **工具更新独立**：先验签清单、再验 SHA-256/大小、下载后做健康检查（`hello.version` 必须等于清单版本），失败保留旧版本；存在未完成事务时拒绝替换引擎。
+- 验收：`python3 scripts/verify_developer_center.py` 26 项全 `pass`，报告 [validation/developer-center.json](validation/developer-center.json)。使用说明与人工验收清单见 [developer-center.md](developer-center.md)。
+
+### 上线命令清单（只准备，未执行）
+
+```bash
+# 1) 构建并签名发布工具（产物不入库，需上传到 Release 资产）
+python3 scripts/build_dev_tool.py --version 1.0.0 --sign
+python3 scripts/build_dev_tool.py --check
+
+# 2) 上传工具资产（发版人手动执行，仓库地址固定）
+gh release create dev-tool-v1.0.0 dist/dev-tool/ordina-publisher-1.0.0.pyz \
+  --repo BrOKenAG/ordina-releases --title "ordina publisher 1.0.0" --notes "首个独立发布工具"
+
+# 3) 发布签名工具清单到 Pages 根目录的 dev-tool/manifest.json
+#    （与 appcast/registry 一样走发布事务，不手工 curl）
+
+# 4) 客户端发版仍走阶段 A 事务：registry → 真实客户端验证 → appcast
+python3 scripts/publish_app_release.py --execute --lab-report docs/validation/lab-release.json
+
+# 5) 上线后体检
+python3 scripts/check_feeds.py --remote
+python3 scripts/verify_developer_center.py
+```

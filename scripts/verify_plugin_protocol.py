@@ -182,7 +182,9 @@ class LabFeed:
 
 
 def compile_harness(destination):
-    command = ['/usr/bin/xcrun', 'swiftc', '-O']
+    # ORDINA_LAB compiles the isolated-registry hook that a release build
+    # does not contain; the harness is the only consumer.
+    command = ['/usr/bin/xcrun', 'swiftc', '-O', '-D', 'ORDINA_LAB']
     command += [str(ROOT / source) for source in SOURCES]
     command += ['-o', str(destination)]
     environment = dict(os.environ)
