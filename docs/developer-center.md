@@ -150,6 +150,29 @@ python3 scripts/verify.py --no-acceptance    # 跳过端到端，只跑回归
 
 实验室使用一次性 Ed25519 密钥签清单与授权（`lab_signing.py`，与 Sparkle 逐字节一致），因此验收不需要开发者的钥匙串，也不会碰真实仓库。
 
+## 安全与故障审计
+
+| 威胁 | 控制手段 | 证据 |
+| --- | --- | --- |
+| ZIP 路径穿越 / 绝对路径 / 反斜杠 / 盘符 | 归一化后逐段校验，任一异常在写盘前拒绝；解压时再校验解析后的目标仍在隔离目录内 | `test_dev_zip.py` 穿越、绝对路径、Windows 路径用例 |
+| 符号链接 / 设备 / 硬链接 / 加密条目 | 按 `external_attr` 的 `S_IFMT` 与 general purpose bit 判定，直接拒绝 | `test_dev_zip.py` symlink/special/encrypted 用例 |
+| ZIP bomb | 压缩比 200×、单文件 1 MB、总量 8 MB、条目 96、路径 200 字符与 4 层深度，全部在解压前按中央目录判定；解压时按实际字节再计数 | `test_dev_zip.py` bomb/oversize/count 用例；端到端 `zip_bomb` |
+| 重复路径 / 大小写折叠 / NFC 变体 | `casefold()` 去重 + NFC 归一；解压用 `O_EXCL`，已存在即拒绝 | `test_dev_zip.py` duplicate 用例、覆盖保护用例 |
+| 一个插件写另一个插件的文件 | 安装路径来自签名清单的 `path`，必须是相对安全路径；安装器按插件 id 的目录与既有能力写入，插件无法声明任意目标 | `test_dev_zip.py`、`test_plugin_protocol.py`、`VerifyPluginInstaller` |
+| 签名覆盖范围不足 | 清单签名覆盖 `descriptor` 与 `files[]`（路径/大小/哈希/角色/安装名）；容器里多出的文件会被 `result.count == container.files.count` 拒绝 | `verify_plugin_protocol.py`、`test_plugin_protocol.py` |
+| 降级/重放旧版本 | 引擎拒绝不高于线上版本（`release.invalid`）；客户端 `newer()` 拒绝降级；清单不含可重放的旧签名 | 端到端 `version_downgrade`、`test_dev_publish.py` |
+| 用缓存绕过签名 | 磁盘缓存只在**网络故障**时回退，回退时重新验签；签名失败绝不回退；缓存记录绑定 registry URL 与 7 天有效期 | `verify_plugin_protocol.py` 的 `offline_cache` / `bad_signature` |
+| lab 注入绕过信任边界 | 所有 lab 开关在 `#if DEBUG || ORDINA_LAB` 内，Release 构建没有这些分支；生产工具包不含 lab 模块 | `VerifyDeveloperCenter`、`test_build_dev_tool.py` |
+| 进程被杀 / 断电 | journal 每阶段 `fsync` + 原子 `os.replace` + 目录 `fsync`；恢复只依赖 journal 与资产，不需要工具在内存里保留状态 | 端到端 `interrupted_publish` → `resume_publish`；`test_durable_*` |
+| 写入失败 / 磁盘满 | 写入前先写 journal；写入异常统一转成 `publish.failed` 并保留可恢复状态，资产与旧清单不被半写 | 端到端注入写失败；`ENOSPC` 走同一 OSError 路径（未单独模拟） |
+| 并发发布 | 隔离后端用独占锁文件，第二个发布者拿到 `release lock is held`；生产后端用 git 非强制引用更新，天然并发失败 | 端到端 `concurrent_blocked` |
+| Pages 延迟 / 读回不一致 | 发布事务在 postflight 前读回线上内容并内置重试（阶段 A） | `verify_lab_release.py`、`test_release_transaction.py` |
+| 未完成事务时替换引擎 | `DevToolManager.install` 与 `rollback` 先数磁盘上的未完成 journal，>0 直接拒绝 | 端到端 `pending_blocks_tool_update` |
+| 凭据泄漏 | 只存钥匙串；状态输出只有 `valid/developer/keyId/expires/scopes/repositories`；仓库、日志、journal、stdout 都不含凭据 | `test_dev_credentials.py` 状态字段断言、端到端授权失败用例 |
+| 参数注入（仓库名 / 备注 / 文件名） | GitHub API 全部走 argv 参数（`gh api` 显式参数），不拼 shell；仓库名必须匹配 `BrOKenAG/ordina-plugin-<id>` 形状 | `test_dev_publish.py`、`test_github_production_backend.py` |
+
+未自动覆盖、必须人工确认的项：真实 Xcode Debug/Release 构建、真实 App 内交互（拖拽、sheet、状态动画）、真实 GitHub Pages 延迟下的端到端发布、磁盘写满的真实系统行为。
+
 ## 人工验收清单（必须在本地 Xcode 构建的 App 上完成）
 
 自动验收覆盖了引擎、协议、事务与客户端逻辑，但**真实 App 构建与人工交互必须在本机 Xcode 里做**（当前会话的 `xcodebuild` 受 `sandbox-exec: Operation not permitted` 限制，无法解析 SwiftPM 依赖）：
