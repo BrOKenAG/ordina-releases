@@ -24,6 +24,10 @@ struct PluginEnvironment: Sendable {
         let version = environment["ORDINA_CLIENT_VERSION"]
             ?? (Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String)
             ?? "0.0.0"
+        #if DEBUG || ORDINA_LAB
+        // Isolated registry and key are a test-only capability. They are
+        // compiled out of a release build, so no environment variable can move
+        // a shipped client onto an untrusted registry or public key.
         if environment["ORDINA_PLUGIN_LAB"] == "1",
            let raw = environment["ORDINA_PLUGIN_REGISTRY"],
            let url = URL(string: raw), let host = url.host {
@@ -32,6 +36,7 @@ struct PluginEnvironment: Sendable {
             return lab(registryURL: url, host: host, publicKey: key,
                        home: home, clientVersion: version)
         }
+        #endif
         return production(home: home, clientVersion: version)
     }
 

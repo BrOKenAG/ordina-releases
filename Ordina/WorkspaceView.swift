@@ -247,6 +247,7 @@ struct WorkspaceSettingsView: View {
     @State private var showingLibraries = false
     @State private var showingPlugins = false
     @State private var versionClicks = 0
+    @State private var showingDeveloper = false
     @State private var interval = ""
     @State private var intervalError = ""
     @Environment(\.dismiss) private var dismiss
@@ -346,6 +347,8 @@ struct WorkspaceSettingsView: View {
                         Spacer()
                         Button("重新打开引导") { OnboardingController.shared.reopen(); dismiss() }
                             .buttonStyle(PaperButtonStyle(compact: true))
+                        Button("开发者中心…") { showingDeveloper = true }
+                            .buttonStyle(PaperButtonStyle(compact: true))
                     }
                 }
                 HStack {
@@ -370,6 +373,7 @@ struct WorkspaceSettingsView: View {
         .frame(width: 620, height: 640).background(Paper.background).foregroundStyle(Paper.ink).tint(Paper.accent)
         .sheet(isPresented: $editing) { WorkflowTemplateEditor(manager: templates) }
         .sheet(isPresented: $showingPlugins) { ResolvePluginsPage() }
+        .sheet(isPresented: $showingDeveloper) { DeveloperCenterView() }
         .sheet(isPresented: $showingLibraries) {
             ResolveLibraryPicker(databases: workspace.databases, selection: databaseID, connectedID: workspace.activeDatabaseID,
                                  checking: workspace.checking, error: workspace.resolveError,
