@@ -391,6 +391,40 @@ final class DeveloperCenterModel: ObservableObject {
 
     // MARK: transactions
 
+    /// Remove a finished transaction record from this Mac only. Pending or
+    /// rolling-back transactions are recovery data and must never be removed.
+    /// The journal path arrives from the tool, so it is validated against the
+    /// developer journals directory before any file is touched: nothing outside
+    /// that directory can ever be deleted, and no online resource is touched.
+    func deleteJournal(_ journal: DevJournal) {
+        guard journal.status == "complete" || journal.status == "rolled_back" else {
+            error = "未完成的事务是恢复数据，不能删除；请先继续或回滚。"
+            return
+        }
+        let path = URL(fileURLWithPath: journal.journal)
+        let allowed = DeveloperPaths.journals.resolvingSymlinksInPath().path
+        let parent = path.deletingLastPathComponent().resolvingSymlinksInPath().path
+        guard path.pathExtension == "json", parent == allowed,
+              !path.lastPathComponent.hasSuffix(".meta.json") else {
+            error = "事务记录路径不在本机记录目录内，已拒绝删除。"
+            return
+        }
+        do {
+            try FileManager.default.removeItem(at: path)
+            try? FileManager.default.removeItem(
+                at: URL(fileURLWithPath: path.path + ".meta.json"))
+            journals.removeAll { $0.id == journal.id }
+            if let history {
+                self.history = DevHistory(records: history.records,
+                                          journals: history.journals.filter { $0.id != journal.id })
+            }
+            error = nil
+            notice = "已删除本机事务记录：\(journal.name ?? journal.plugin ?? "") v\(journal.version ?? "")。线上 Registry 与 Release 资产未改动。"
+        } catch let failure {
+            error = "删除记录失败：\(failure.localizedDescription)"
+        }
+    }
+
     func resume(_ journal: DevJournal) async {
         guard let service = makeService() else { return }
         stages = []

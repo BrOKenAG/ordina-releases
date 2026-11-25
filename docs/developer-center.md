@@ -47,7 +47,7 @@ DevToolManager        工具下载/校验/回滚      ├─ dev_zip.py         
 5. **填写更新说明**：会进入 Release 正文与清单。
 6. **预览**：展示文件级 diff、将写入的清单、需要的仓库步骤、阻塞项与**指纹**（64 位十六进制）。
 7. **发布**：必须带上预览指纹；输入若在预览后变化会被拒绝（`preview.stale`）。新增插件需要显式确认创建仓库。
-8. **管理与恢复**：事务列表显示阶段进度；中断的事务可「继续」（resume）或「回滚」（rollback）；发布历史保留在 `records.jsonl`。
+8. **管理与恢复**：事务列表显示阶段进度；中断的事务可「继续」（resume）或「回滚」（rollback）；已完成/已回滚的**本机事务记录**可「删除」（二次确认，只删 `journals/` 下的 `.json` 与 `.meta.json`，不碰线上 Registry、插件清单、Release 资产，也不清 `records.jsonl`）；发布历史保留在 `records.jsonl`。
 9. **工具更新/回滚**：独立通道。存在未完成事务时禁止替换引擎；替换失败自动保留旧版本。
 
 发布过程中的阶段事件来自引擎真实回调，UI 不推测进度：
@@ -170,6 +170,7 @@ python3 scripts/verify.py --no-acceptance    # 跳过端到端，只跑回归
 | 未完成事务时替换引擎 | `DevToolManager.install` 与 `rollback` 先数磁盘上的未完成 journal，>0 直接拒绝 | 端到端 `pending_blocks_tool_update` |
 | 凭据泄漏 | 只存钥匙串；状态输出只有 `valid/developer/keyId/expires/scopes/repositories`；仓库、日志、journal、stdout 都不含凭据 | `test_dev_credentials.py` 状态字段断言、端到端授权失败用例 |
 | 参数注入（仓库名 / 备注 / 文件名） | GitHub API 全部走 argv 参数（`gh api` 显式参数），不拼 shell；仓库名必须匹配 `BrOKenAG/ordina-plugin-<id>` 形状 | `test_dev_publish.py`、`test_github_production_backend.py` |
+| 删除记录误删任意文件 / 线上资产 | 只允许删除 `DeveloperPaths.journals` 目录内已终结（`complete` / `rolled_back`）的 `.json`；路径经符号链接解析校验，未完成事务禁止删除，且需二次确认；不写任何线上资源 | `VerifyDeveloperCenter` 删除路径与 pending 保护断言 |
 
 未自动覆盖、必须人工确认的项：真实 Xcode Debug/Release 构建、真实 App 内交互（拖拽、sheet、状态动画）、真实 GitHub Pages 延迟下的端到端发布、磁盘写满的真实系统行为。
 
@@ -188,6 +189,7 @@ python3 scripts/verify.py --no-acceptance    # 跳过端到端，只跑回归
 7. 回滚该次发布 → 确认 Registry 恢复到上一版本、Release 资产保留。
 8. 工具更新期间存在未完成事务 → 确认被阻止并提示。
 9. 打开「高级」折叠区，确认路径与诊断信息可复制，且**不显示任何凭据内容**。
+10. 「管理」→ 对一条已完成/已回滚记录点「删除」→ 二次确认应说明仅删本机记录、对仍可回滚的记录给出警告 → 删除后列表移除该条，线上 Registry 与 Release 资产不变；未完成事务不显示「删除」。
 
 ## 故障排查
 

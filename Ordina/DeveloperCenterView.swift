@@ -14,6 +14,7 @@ struct DeveloperCenterView: View {
     @State private var targeted = false
     @State private var confirmingPublish = false
     @State private var confirmingRollback: DevJournal?
+    @State private var confirmingDelete: DevJournal?
     @State private var confirmingToolInstall = false
     @State private var rollbackReason = ""
     @State private var showingLog = false
@@ -72,6 +73,9 @@ struct DeveloperCenterView: View {
         }
         .sheet(item: $confirmingRollback) { journal in
             rollbackSheet(journal)
+        }
+        .sheet(item: $confirmingDelete) { journal in
+            deleteSheet(journal)
         }
     }
 
@@ -543,6 +547,11 @@ struct DeveloperCenterView: View {
                 }
                 .buttonStyle(PaperQuietButton()).disabled(model.busy)
             }
+            if journal.status == "complete" || journal.status == "rolled_back" {
+                Button("删除") { confirmingDelete = journal }
+                    .buttonStyle(PaperQuietButton()).disabled(model.busy)
+                    .help("仅删除本机事务记录，不影响线上资产")
+            }
         }
         .frame(minHeight: 52)
     }
@@ -584,6 +593,33 @@ struct DeveloperCenterView: View {
                     let target = journal
                     confirmingRollback = nil
                     Task { await model.rollback(target, reason: rollbackReason) }
+                }
+                .buttonStyle(PaperButtonStyle(primary: true))
+            }
+        }
+        .padding(24).frame(width: 460).background(Paper.background)
+    }
+
+    private func deleteSheet(_ journal: DevJournal) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("删除本机事务记录").font(Paper.font(21).weight(.semibold))
+            Text("\(journal.name ?? journal.plugin ?? "") v\(journal.version ?? "")")
+                .font(Paper.font(13))
+            Text("仅删除这台 Mac 上的事务记录文件，不会改动线上 Registry、插件清单、Release 资产，也不会清除历史发布记录。")
+                .font(Paper.font(12)).foregroundStyle(Paper.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            if journal.rollbackable {
+                Text("注意：该次发布仍可回滚，删除后将无法在 App 内回滚它。")
+                    .font(Paper.font(12)).foregroundStyle(Paper.error)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            HStack {
+                Spacer()
+                Button("取消") { confirmingDelete = nil }
+                    .buttonStyle(PaperButtonStyle()).keyboardShortcut(.cancelAction)
+                Button("删除") {
+                    confirmingDelete = nil
+                    model.deleteJournal(journal)
                 }
                 .buttonStyle(PaperButtonStyle(primary: true))
             }

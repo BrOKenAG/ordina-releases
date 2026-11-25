@@ -176,6 +176,51 @@ struct VerifyDeveloperCenter {
             try require(!model.canPublish, "completed publish can still be published again")
         }
 
+        // Deleting a finished journal is local-only and path-checked. Pending
+        // transactions and paths outside the records directory are protected.
+        try MainActor.assumeIsolated {
+            let directory = DeveloperPaths.journals
+            try manager.createDirectory(at: directory, withIntermediateDirectories: true)
+            let record = directory.appendingPathComponent("tx-delete.json")
+            let sidecar = URL(fileURLWithPath: record.path + ".meta.json")
+            try "{\"status\":\"complete\"}".write(to: record, atomically: true,
+                                                  encoding: .utf8)
+            try "{}".write(to: sidecar, atomically: true, encoding: .utf8)
+
+            func entry(_ path: String, _ status: String,
+                       _ resumable: Bool) -> DevJournal {
+                DevJournal(journal: path, status: status, plugin: "demo",
+                           name: "Demo", version: "1.0.0", previousVersion: nil,
+                           repository: nil, tag: nil, notes: nil, createdAt: nil,
+                           toolVersion: nil, resumable: resumable,
+                           rollbackable: status == "complete", repositories: [:])
+            }
+            let model = DeveloperCenterModel()
+            model.deleteJournal(entry(record.path, "complete", false))
+            try require(!manager.fileExists(atPath: record.path),
+                        "finished journal was not removed")
+            try require(!manager.fileExists(atPath: sidecar.path),
+                        "journal sidecar was not removed")
+            try require(model.error == nil, "delete reported an unexpected error")
+            try require(model.notice?.contains("线上 Registry") == true,
+                        "delete notice omitted the online-safety boundary")
+
+            let outside = root.appendingPathComponent("outside.json")
+            try "{}".write(to: outside, atomically: true, encoding: .utf8)
+            model.deleteJournal(entry(outside.path, "complete", false))
+            try require(manager.fileExists(atPath: outside.path),
+                        "journal outside the records directory was deleted")
+            try require(model.error != nil, "forged path was not rejected")
+
+            let pending = directory.appendingPathComponent("tx-pending.json")
+            try "{\"status\":\"publishing\"}".write(to: pending, atomically: true,
+                                                   encoding: .utf8)
+            model.deleteJournal(entry(pending.path, "publishing", true))
+            try require(manager.fileExists(atPath: pending.path),
+                        "pending transaction was deleted")
+            try require(model.error != nil, "pending transaction was not protected")
+        }
+
         print("VerifyDeveloperCenter: ok")
     }
 }
