@@ -156,6 +156,7 @@ struct DeveloperCenterView: View {
         VStack(alignment: .leading, spacing: 16) {
             if model.toolState.level != .ready { toolHint }
             packageSection
+            localTestSection
             if let inspection = model.inspection {
                 packageCard(inspection)
                 notesSection
@@ -215,10 +216,7 @@ struct DeveloperCenterView: View {
                     Spacer()
                     Button("更换…") { selectingPackage = true }
                         .buttonStyle(PaperButtonStyle(compact: true)).disabled(model.busy)
-                    Button("移出") {
-                        model.packageURL = nil; model.inspection = nil
-                        model.preview = nil; model.stages = []
-                    }
+                    Button("移出") { model.clearPackage() }
                     .buttonStyle(PaperQuietButton()).disabled(model.busy)
                 }
                 .dropDestination(for: URL.self) { urls, _ in
@@ -280,19 +278,29 @@ struct DeveloperCenterView: View {
                     .font(Paper.font(12)).foregroundStyle(Paper.error)
                     .fixedSize(horizontal: false, vertical: true)
             }
-            if let result = model.localTestResult {
-                HStack(spacing: 8) {
-                    badge("已安装测试版本 \(result.version)", color: Paper.accent)
-                    Text("仅写入本机，不影响线上").font(Paper.font(11)).foregroundStyle(Paper.secondary)
-                    Spacer()
-                    Button("卸载测试版本") { Task { await model.uninstallLocalTest() } }
-                        .buttonStyle(PaperQuietButton()).disabled(model.busy)
-                }
-            }
         }
         .padding(14)
         .background(Paper.surface, in: RoundedRectangle(cornerRadius: 14))
         .overlay { RoundedRectangle(cornerRadius: 14).strokeBorder(Paper.rule, lineWidth: 0.8) }
+    }
+
+    /// The local test build lives on this Mac rather than belonging to the
+    /// selected ZIP, so its uninstall entry must stay reachable after a
+    /// publish resets the release tab back to the drop zone.
+    @ViewBuilder
+    private var localTestSection: some View {
+        if let result = model.localTestResult {
+            HStack(spacing: 8) {
+                badge("已安装测试版本 \(result.version)", color: Paper.accent)
+                Text("仅写入本机，不影响线上").font(Paper.font(11)).foregroundStyle(Paper.secondary)
+                Spacer()
+                Button("卸载测试版本") { Task { await model.uninstallLocalTest() } }
+                    .buttonStyle(PaperQuietButton()).disabled(model.busy)
+            }
+            .padding(14)
+            .background(Paper.surface, in: RoundedRectangle(cornerRadius: 14))
+            .overlay { RoundedRectangle(cornerRadius: 14).strokeBorder(Paper.rule, lineWidth: 0.8) }
+        }
     }
 
     private func versionLine(_ inspection: DevInspection) -> String {

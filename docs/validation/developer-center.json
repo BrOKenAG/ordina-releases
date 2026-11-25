@@ -3,7 +3,7 @@
   "passed": true,
   "clientVersion": "1.10.0",
   "compiledOnce": true,
-  "harnessSha256": "8d11457610fcd5b2a6a059d757026c3074ac1aa95f2d3ff8e8153f05f32a64ea",
+  "harnessSha256": "4b8dd94a84ad9e4eba9bc566641bee459a2a6c27e6f1b9a7467ad4202e3c4ea3",
   "productionToolVersion": "1.0.0",
   "labToolVersions": [
     "1.0.0",
@@ -71,7 +71,7 @@
       "uninstalled": true
     },
     "preview": {
-      "fingerprint": "4d85b26d126f",
+      "fingerprint": "15702cba8b56",
       "checks": 6
     },
     "preview_stale": {
@@ -146,5 +146,5 @@
       "journals": 5
     }
   },
-  "timestamp": "2026-11-25T10:48:51Z"
+  "timestamp": "2026-11-25T11:02:56Z"
 }

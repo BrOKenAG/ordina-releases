@@ -8,12 +8,19 @@ manifest and its asset. Every signed document is verified against the isolated
 lab key, every asset is verified against its declared SHA-256, and every URL is
 asserted to point at 127.0.0.1 so no production resource can be reached.
 
+The port is fixed by environment.json because the generated signed manifests
+contain absolute loopback URLs. If start-registry.sh is already running, this
+script reuses that server instead of failing on a busy port, so it can also be
+run in the middle of a manual acceptance run (plugin versions will have
+advanced past the initial 1.0.0, which is expected).
+
     python3 scripts/verify_app_acceptance.py
 """
 import argparse
 import base64
 import hashlib
 import json
+import socket
 import sys
 import threading
 import time
@@ -44,12 +51,16 @@ def decoded(raw, key, label):
     return json.loads(payload)
 
 
+def listening(port):
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+        probe.settimeout(0.5)
+        return probe.connect_ex(('127.0.0.1', port)) == 0
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument('--root', type=Path, default=ROOT / 'dist' / 'app-acceptance')
-    parser.add_argument('--port', type=int, default=None,
-                        help='默认取 environment.json 里生成时使用的端口')
     parser.add_argument('--report', type=Path, default=REPORT)
     args = parser.parse_args()
 
@@ -57,7 +68,7 @@ def main():
     require((root / 'registry' / 'routes.json').is_file(),
             '请先运行 python3 scripts/prepare_app_acceptance.py')
     environment = json.loads((root / 'environment.json').read_text(encoding='utf-8'))
-    port = args.port if args.port is not None else int(environment['port'])
+    port = int(environment['port'])
     checks = {}
     details = {}
 
@@ -73,9 +84,16 @@ def main():
 
     seed = lab_signing.read_seed(str(root / 'credentials' / 'lab-signing.key'))
     key = lab_signing.public_key(seed)
-    server = AcceptanceServer(root, port)
-    thread = threading.Thread(target=server.httpd.serve_forever, daemon=True)
-    thread.start()
+
+    # Reuse start-registry.sh when it is already running; otherwise start a
+    # throwaway server for this check only.
+    server = None
+    thread = None
+    reused = listening(port)
+    if not reused:
+        server = AcceptanceServer(root, port)
+        thread = threading.Thread(target=server.httpd.serve_forever, daemon=True)
+        thread.start()
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
 
     def get(path):
@@ -134,7 +152,7 @@ def main():
             document = signed('/dev-tool/manifest.json')
             sizes = {}
             for item in document['versions']:
-                route = '/' + item['url'].split(f'127.0.0.1:{port}/', 1)[1]
+                route = '/' + item['url'].split(prefix, 1)[1]
                 status, raw = get(route)
                 require(status == 200, f'{route} 返回 {status}')
                 require(hashlib.sha256(raw).hexdigest() == item['sha256'],
@@ -160,7 +178,12 @@ def main():
             require(len(entries) == 1, f'插件清单条目数异常：{len(entries)}')
             entry = entries[0]
             collected_urls.append(entry['url'])
-            require(entry['version'] == '1.0.0', entry['version'])
+            # A manual acceptance run publishes updates, so the version moves
+            # past the initial 1.0.0. Only require a well-formed version; the
+            # asset URL and its SHA-256 are checked separately.
+            require(bool(entry.get('version')), '插件清单缺少版本')
+            require(entry['url'].startswith(prefix),
+                    f"插件资产 URL 不在隔离服务：{entry['url']}")
             return {'version': entry['version'], 'url': entry['url']}
 
         def plugin_asset():
@@ -204,13 +227,15 @@ def main():
         ):
             check(name, function)
     finally:
-        server.httpd.shutdown()
-        server.httpd.server_close()
-        thread.join(timeout=5)
+        if server is not None:
+            server.httpd.shutdown()
+            server.httpd.server_close()
+            thread.join(timeout=5)
 
     passed = all(value == 'pass' for value in checks.values())
     report = {
         'format': 1, 'passed': passed, 'root': str(root), 'port': port,
+        'reusedRunningServer': reused,
         'checks': checks, 'details': details,
         'trustChain': 'isolated-lab-key',
         'productionResourcesTouched': False,

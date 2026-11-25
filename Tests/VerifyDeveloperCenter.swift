@@ -154,6 +154,28 @@ struct VerifyDeveloperCenter {
         try require(failure.code == "publish.failed" && failure.stage == "feeds"
                         && failure.journal == "/tmp/tx.json", "failure metadata lost")
 
+        // A successful publish returns the release tab to its initial drop
+        // zone. No stale ZIP, notes, preview or progress may survive it.
+        try MainActor.assumeIsolated {
+            let model = DeveloperCenterModel()
+            model.packageURL = URL(fileURLWithPath: "/tmp/demo.zip")
+            model.notes = "首次发布 Demo"
+            model.stages = [DeveloperCenterModel.Stage(name: "preflight", state: "ok")]
+            model.logLines = ["done"]
+            model.error = "旧错误"
+            model.phase = .working("正在发布…")
+            model.clearPackage()
+            try require(model.packageURL == nil, "completed publish kept the selected ZIP")
+            try require(model.inspection == nil, "completed publish kept the inspection")
+            try require(model.preview == nil, "completed publish kept the preview")
+            try require(model.notes.isEmpty, "completed publish kept the release notes")
+            try require(model.stages.isEmpty, "completed publish kept the progress list")
+            try require(model.logLines.isEmpty, "completed publish kept the log")
+            try require(model.error == nil, "completed publish kept a stale error")
+            try require(model.phase == .idle, "completed publish left a running phase")
+            try require(!model.canPublish, "completed publish can still be published again")
+        }
+
         print("VerifyDeveloperCenter: ok")
     }
 }

@@ -294,6 +294,21 @@ final class DeveloperCenterModel: ObservableObject {
 
     // MARK: package flow
 
+    /// Return the release tab to its initial drop zone. A finished publish (or
+    /// an explicit "移出") must not leave the previous ZIP, inspection, notes
+    /// or progress list on screen. Records and the installed local test build
+    /// are independent of the selected package and deliberately stay intact.
+    func clearPackage() {
+        packageURL = nil
+        inspection = nil
+        preview = nil
+        notes = ""
+        stages = []
+        logLines = []
+        error = nil
+        phase = .idle
+    }
+
     func choosePackage(_ url: URL) async {
         packageURL = url
         inspection = nil
@@ -362,8 +377,9 @@ final class DeveloperCenterModel: ObservableObject {
                 }
             lastJournal = result.journal
             notice = "已发布 \(result.plugin) \(result.version)"
-            phase = .idle
-            self.preview = nil
+            // Success closes the release flow: back to the drop zone, with the
+            // confirmation kept in the footer notice.
+            clearPackage()
             await refreshAll()
         } catch let failure as DevFailure {
             apply(failure: failure)
