@@ -119,6 +119,16 @@ class FeedSigningTests(unittest.TestCase):
             self.assertIsNone(feed_signing.lab_seed())
             self.assertEqual(feed_signing.signing_mode(), 'keychain')
 
+    def test_lab_without_key_fails_without_accessing_keychain(self):
+        import os
+        from unittest.mock import patch
+        import feed_signing
+        with patch.dict(os.environ, {'ORDINA_DEV_LAB': '1'}, clear=True), \
+             patch.object(feed_signing, 'sign_tool') as tool:
+            with self.assertRaisesRegex(ValueError, '实验室签名密钥'):
+                feed_signing.envelope_bytes({'format': 1})
+            tool.assert_not_called()
+
 
 if __name__ == '__main__':
     unittest.main()

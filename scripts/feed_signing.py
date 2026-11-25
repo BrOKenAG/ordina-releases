@@ -38,7 +38,7 @@ def lab_seed():
         return None
     raw = os.environ.get('ORDINA_DEV_SIGN_KEY')
     if not raw:
-        return None
+        raise ValueError('隔离环境缺少实验室签名密钥，已停止以避免访问钥匙串。')
     import lab_signing
     return lab_signing.read_seed(raw)
 
