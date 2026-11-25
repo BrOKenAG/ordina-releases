@@ -1,4 +1,5 @@
 """Download the pinned official Sparkle tools and verify their archive."""
+import os
 from pathlib import Path
 import hashlib
 import subprocess
@@ -7,7 +8,8 @@ import tempfile
 VERSION = '2.10.1'
 ARCHIVE_SHA256 = '1a856d2a9edb8e628de88121d7be04cf0e2167f8641650b78fca00b14244cf27'
 KEYCHAIN_ACCOUNT = 'ordina-sparkle'
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(os.environ.get('ORDINA_DEV_REPO')
+            or Path(__file__).resolve().parents[1]).expanduser().resolve()
 
 
 def ensure_tools():

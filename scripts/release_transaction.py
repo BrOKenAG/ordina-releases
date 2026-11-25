@@ -18,11 +18,14 @@ how the ordering invariant is verified without touching GitHub.
 import base64
 import hashlib
 import json
+import os
 import subprocess
 from dataclasses import dataclass, field, replace
 from pathlib import Path
+from typing import Optional
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(os.environ.get('ORDINA_DEV_REPO')
+            or Path(__file__).resolve().parents[1]).expanduser().resolve()
 CURL = '/usr/bin/curl'
 STAGES = ('preflight', 'asset', 'gate', 'feeds', 'push', 'postflight')
 
@@ -53,8 +56,8 @@ class Asset:
 class FeedTarget:
     label: str
     content: bytes
-    path: Path | None = None          # local file in the main repository
-    repository: str | None = None     # remote repo whose manifest is PUT
+    path: Optional[Path] = None          # local file in the main repository
+    repository: Optional[str] = None     # remote repo whose manifest is PUT
     remote_path: str = 'manifest.json'
 
 
@@ -66,13 +69,13 @@ class Plan:
     title: str
     notes: str
     asset: Asset
-    ed_signature: str | None = None
+    ed_signature: Optional[str] = None
     latest: bool = False
     feeds: list[FeedTarget] = field(default_factory=list)
     commit_paths: list[str] = field(default_factory=list)
     commit_message: str = 'Publish signed feeds'
     publish_appcast: bool = False
-    validation_report: Path | None = None
+    validation_report: Optional[Path] = None
 
 
 def check_asset(code, downloaded, asset, signature_ok=True):
@@ -150,16 +153,22 @@ def verify_asset(plan, gateway, tmp, timeout):
     return check_asset(code, data, plan.asset, signature_ok)
 
 
-def execute(plan, gateway, tmp, timeout=300):
+def execute(plan, gateway, tmp, timeout=300, on_stage=None):
     """Run the fixed stage order. Never proceeds past a failed stage."""
     completed = []
 
     def step(name, operation):
+        if on_stage is not None:
+            on_stage(name, 'running')
         try:
             result = operation()
         except Exception as error:
+            if on_stage is not None:
+                on_stage(name, 'failed')
             raise ReleaseError(name, str(error), completed) from error
         completed.append(name)
+        if on_stage is not None:
+            on_stage(name, 'ok')
         return result
 
     step('preflight', lambda: gateway.preflight(plan))

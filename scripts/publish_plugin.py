@@ -24,7 +24,9 @@ import json
 import re
 import sys
 import tempfile
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Optional
 
 import durable_release
 import plugin_protocol as protocol
@@ -195,6 +197,115 @@ def parse_repo_paths(items):
     return result
 
 
+@dataclass(frozen=True)
+class PreparedRelease:
+    """Everything one release needs, derived from a single source directory."""
+    name: str
+    version: str
+    data: bytes
+    files: list
+    plugins: dict
+    document: dict
+    generated: dict
+    target: dict
+    plan: Plan
+    source: Path
+    is_new: bool
+    previous_version: Optional[str]
+
+
+def prepare_release(name, source_path, notes=None, plugins=None, document=None,
+                    repo_paths=None, require_version_increase=True):
+    """Build the complete release plan without touching any remote.
+
+    Shared by the command-line publisher and the developer publishing engine so
+    a ZIP release goes through exactly the same asset build, feed generation
+    and plan construction. Only reads the source directory and the registry
+    source file; writes nothing.
+    """
+    plugins = plugins if plugins is not None else load_source()
+    is_new = name not in plugins
+    if is_new:
+        if source_path is None:
+            raise ValueError(f'未登记的插件 {name} 需要提供插件源目录。')
+        plugins[name] = register_plugin(name, source_path)
+    meta = plugins[name]
+    source, data, ver, files = build_asset(meta, source_path, name)
+    if meta.get('protocol', protocol.PROTOCOL) != protocol.PROTOCOL:
+        raise ValueError('插件协议版本不受支持。')
+    previous = meta.get('version') or None
+    if previous and tuple(map(int, ver.split('.'))) <= tuple(map(int, previous.split('.'))):
+        message = f'插件版本 {ver} 必须高于已发布版本 {previous}。'
+        if require_version_increase:
+            raise ValueError(message)
+        print(f'预演：{message}真实发布会在此被拒绝', file=sys.stderr)
+    protocol.validate_descriptor(name, protocol.descriptor(name, meta, version=ver))
+    protocol.validate_files(name, meta['kind'], files)
+
+    document = copy.deepcopy(document) if document is not None else json.loads(
+        SOURCE_PATH.read_text(encoding='utf-8'))
+    if name not in document['plugins']:
+        document['plugins'][name] = copy.deepcopy(plugins[name])
+    document['plugins'][name].update({
+        'version': ver,
+        'sha256': hashlib.sha256(data).hexdigest(),
+        'size': len(data),
+        'files': files,
+        'published': True,
+    })
+    source_bytes = (json.dumps(document, ensure_ascii=False, indent=2)
+                    + '\n').encode('utf-8')
+    generated = generate(document['plugins'])
+
+    target = document['plugins'][name]
+    asset_url = entry(name, target)['url']
+    tag = f'plugin-{name}-v{ver}'
+    display = target.get('name') or name
+    repo_paths = repo_paths or {}
+    feeds = [
+        FeedTarget('registry', generated['registry'][1], path=ROOT / 'registry.json'),
+        FeedTarget('legacy', generated['legacy'][1],
+                   path=ROOT / 'plugins' / 'manifest.json'),
+        FeedTarget('source', source_bytes, path=SOURCE_PATH),
+    ]
+    # Each plugin repository keeps two feeds: the new format and the frozen
+    # compatibility feed older clients still read.
+    for label, (doc, envelope_data) in generated.items():
+        if label.startswith('plugin:'):
+            plugin_name = label.split(':', 1)[1]
+            remote = 'manifest-v2.json'
+        elif label.startswith('compat-plugin:'):
+            plugin_name = label.split(':', 1)[1]
+            remote = 'manifest.json'
+        else:
+            continue
+        clone = repo_paths.get(plugin_name)
+        feeds.append(FeedTarget(
+            label, envelope_data,
+            path=clone / remote if clone else None,
+            repository=document['plugins'][plugin_name]['repository'],
+            remote_path=remote,
+        ))
+    plan = Plan(
+        label=f'{display} v{ver}',
+        repository=target['repository'],
+        tag=tag,
+        title=f'{display} v{ver}',
+        notes=notes or f'{display} v{ver}',
+        asset=Asset(target['asset'], data, asset_url),
+        feeds=feeds,
+        commit_paths=['registry.json', 'plugins/manifest.json',
+                      'plugins/registry.source.json',
+                      str(source.relative_to(ROOT)) if source.is_relative_to(ROOT)
+                      else 'plugins/registry.source.json'],
+        commit_message=f'Publish {name} plugin v{ver}',
+    )
+    return PreparedRelease(name=name, version=ver, data=data, files=files,
+                           plugins=plugins, document=document, generated=generated,
+                           target=target, plan=plan, source=source, is_new=is_new,
+                           previous_version=previous)
+
+
 def main():
     plugins = load_source()
     parser = argparse.ArgumentParser(description=__doc__)
@@ -206,6 +317,7 @@ def main():
     parser.add_argument('--dry-run', action='store_true',
                         help='走完整流程但不产生任何网络或磁盘副作用')
     parser.add_argument('--execute', action='store_true', help='执行真实持久化发布事务')
+    parser.add_argument('--notes', help='Release 更新说明；默认使用“名称 版本”')
     parser.add_argument('--timeout', type=int, default=300)
     parser.add_argument('--journal-dir', type=Path,
                         default=durable_release.TRANSACTIONS)
@@ -220,97 +332,27 @@ def main():
         if args.execute and not durable_release.lab_report_valid(args.lab_report):
             raise ValueError('缺少有效的隔离仓库验证报告（--lab-report），已停止发布。')
         name = args.plugin
-        if name not in plugins:
-            if not args.source:
-                raise ValueError(f'未登记的插件 {name} 需要 --source 指向插件源目录。')
-            plugins[name] = register_plugin(name, args.source)
-        meta = plugins[name]
-        source, data, ver, files = build_asset(meta, args.source, name)
-        if meta.get('protocol', protocol.PROTOCOL) != protocol.PROTOCOL:
-            raise ValueError('插件协议版本不受支持。')
-        previous = meta.get('version')
-        if previous and tuple(map(int, ver.split('.'))) <= tuple(map(int, previous.split('.'))):
-            if not args.dry_run:
-                raise ValueError(f'插件版本 {ver} 必须高于已发布版本 {previous}。')
-            print(f'预演：版本 {ver} 未递增，真实发布会在 preflight 前被拒绝', file=sys.stderr)
-        protocol.validate_descriptor(name, protocol.descriptor(name, meta, version=ver))
-        protocol.validate_files(name, meta['kind'], files)
-
-        # Compute the new source and every derived feed in memory. Nothing is
-        # written to disk until the GATE has passed.
-        document = json.loads(SOURCE_PATH.read_text(encoding='utf-8'))
-        if name not in document['plugins']:
-            document['plugins'][name] = copy.deepcopy(plugins[name])
-        document['plugins'][name].update({
-            'version': ver,
-            'sha256': hashlib.sha256(data).hexdigest(),
-            'size': len(data),
-            'files': files,
-            'published': True,
-        })
-        source_bytes = (json.dumps(document, ensure_ascii=False, indent=2)
-                        + '\n').encode('utf-8')
-        generated = generate(document['plugins'])
-
-        target = document['plugins'][name]
-        asset_url = entry(name, target)['url']
-        tag = f'plugin-{name}-v{ver}'
-        display = target.get('name') or name
-
-        repo_paths = parse_repo_paths(args.repo_path)
-        feeds = [
-            FeedTarget('registry', generated['registry'][1], path=ROOT / 'registry.json'),
-            FeedTarget('legacy', generated['legacy'][1],
-                       path=ROOT / 'plugins' / 'manifest.json'),
-            FeedTarget('source', source_bytes, path=SOURCE_PATH),
-        ]
-        # Each plugin repository keeps two feeds: the new format and the
-        # frozen compatibility feed older clients still read.
-        for label, (doc, envelope_data) in generated.items():
-            if label.startswith('plugin:'):
-                plugin_name = label.split(':', 1)[1]
-                remote = 'manifest-v2.json'
-            elif label.startswith('compat-plugin:'):
-                plugin_name = label.split(':', 1)[1]
-                remote = 'manifest.json'
-            else:
-                continue
-            clone = repo_paths.get(plugin_name)
-            feeds.append(FeedTarget(
-                label, envelope_data,
-                path=clone / remote if clone else None,
-                repository=document['plugins'][plugin_name]['repository'],
-                remote_path=remote,
-            ))
-
-        plan = Plan(
-            label=f'{display} v{ver}',
-            repository=target['repository'],
-            tag=tag,
-            title=f'{display} v{ver}',
-            notes=f'{display} v{ver}',
-            asset=Asset(target['asset'], data, asset_url),
-            feeds=feeds,
-            commit_paths=['registry.json', 'plugins/manifest.json',
-                          'plugins/registry.source.json',
-                          str(source.relative_to(ROOT)) if source.is_relative_to(ROOT)
-                          else 'plugins/registry.source.json'],
-            commit_message=f'Publish {name} plugin v{ver}',
-        )
+        prepared = prepare_release(
+            name, args.source, notes=args.notes, plugins=plugins,
+            repo_paths=parse_repo_paths(args.repo_path),
+            require_version_increase=not args.dry_run)
+        plan = prepared.plan
+        data, files, feeds, target = (prepared.data, prepared.files,
+                                      plan.feeds, prepared.target)
 
         with tempfile.TemporaryDirectory(prefix='ordina-plugin-release-') as temporary:
             tmp = Path(temporary)
             journal_dir = tmp / 'journals' if args.dry_run else args.journal_dir
-            prepared = durable_release.prepare(
-                plan, f'plugin-{name}-v{ver}', journal_dir=journal_dir)
+            staged = durable_release.prepare(
+                plan, f'plugin-{name}-v{prepared.version}', journal_dir=journal_dir)
             if args.dry_run:
-                backend = durable_release.DryRunBackend(prepared.plan['feeds'])
+                backend = durable_release.DryRunBackend(staged.plan['feeds'])
                 gateway = DryRunGateway(data)
             else:
-                backend = durable_release.production_backend(prepared, plan)
+                backend = durable_release.production_backend(staged, plan)
                 gateway = LocalGateway()
             result = durable_release.execute(plan, gateway, backend,
-                                             prepared, tmp, args.timeout)
+                                             staged, tmp, args.timeout)
             if args.dry_run:
                 print(f'预演通过：{plan.label} → {plan.repository}')
                 print('阶段：' + ' → '.join(result['stages']))
@@ -320,7 +362,7 @@ def main():
             print(f'已发布 {plan.label}（{result["asset"]}）到 {plan.repository}')
             print('事务记录：' + result['journal'])
     except ReleaseError as error:
-        journal = prepared.journal if 'prepared' in locals() else None
+        journal = staged.journal if 'staged' in locals() else None
         sys.exit(durable_release.describe(error, journal))
     except (ValueError, OSError) as error:
         sys.exit(f'发布失败：{error}')

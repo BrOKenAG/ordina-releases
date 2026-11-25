@@ -8,6 +8,7 @@ public key already embedded in the app.
 """
 import base64
 import json
+import os
 import subprocess
 import tempfile
 from pathlib import Path
@@ -27,9 +28,37 @@ def sign_tool():
     return Path(ensure_tools()) / 'sign_update'
 
 
+def lab_seed():
+    """Return the throwaway lab seed, or None outside an isolated lab.
+
+    A lab run must never touch the developer's Keychain, and a test must not
+    depend on a key that happens to be present in the inherited keychain. The
+    seed comes from ``ORDINA_DEV_SIGN_KEY`` and is only honoured when the
+    process is explicitly a lab process.
+    """
+    if os.environ.get('ORDINA_DEV_LAB') != '1':
+        return None
+    raw = os.environ.get('ORDINA_DEV_SIGN_KEY')
+    if not raw:
+        return None
+    import lab_signing
+    return lab_signing.read_seed(raw)
+
+
+def signing_mode():
+    return 'lab-key' if lab_seed() is not None else 'keychain'
+
+
 def sign_document(document, tool=None):
     """Return (canonical payload bytes, base64 Ed25519 signature)."""
     data = canonical(document)
+    seed = lab_seed()
+    if seed is not None:
+        import lab_signing
+        raw = lab_signing.signature(seed, data)
+        if not lab_signing.verify(lab_signing.public_key(seed), data, raw):
+            raise ValueError('实验室签名自校验失败。')
+        return data, base64.b64encode(raw).decode('ascii')
     tool = tool or sign_tool()
     with tempfile.TemporaryDirectory(prefix='ordina-feed-sign-') as temporary:
         payload = Path(temporary) / 'payload.json'
@@ -62,6 +91,13 @@ def verify_envelope(raw, tool=None):
     obj = json.loads(raw)
     payload = base64.b64decode(obj['payload'], validate=True)
     signature = obj.get('signature', '')
+    seed = lab_seed()
+    if seed is not None:
+        import lab_signing
+        if not lab_signing.verify(lab_signing.public_key(seed), payload,
+                                  base64.b64decode(signature, validate=True)):
+            raise ValueError('清单签名无效。')
+        return json.loads(payload)
     tool = tool or sign_tool()
     with tempfile.TemporaryDirectory(prefix='ordina-feed-verify-') as temporary:
         path = Path(temporary) / 'payload.json'

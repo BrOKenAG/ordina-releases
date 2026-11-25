@@ -161,10 +161,10 @@ def prepare(plan, scope, include_appcast=True, only_appcast=False,
                     {repo: sorted(fs) for repo, fs in files.items()}, asset_source)
 
 
-def lab_report_valid(path=LAB_REPORT):
+def lab_report_valid(path=None):
     """A real isolated-repo validation report is required for production runs."""
     try:
-        report = json.loads(Path(path).read_text(encoding='utf-8'))
+        report = json.loads(Path(path or LAB_REPORT).read_text(encoding='utf-8'))
     except (OSError, ValueError):
         return False
     if report.get('format') != 1 or report.get('passed') is not True:
@@ -217,16 +217,22 @@ def resume_journal(journal_path, backend):
     return journal['plan']
 
 
-def execute(plan, gateway, backend, prepared, tmp, timeout=300):
+def execute(plan, gateway, backend, prepared, tmp, timeout=300, on_stage=None):
     """Run the fixed stages; durable_transaction owns every remote feed write."""
     completed = []
 
     def step(name, operation):
+        if on_stage is not None:
+            on_stage(name, 'running')
         try:
             result = operation()
         except Exception as error:
+            if on_stage is not None:
+                on_stage(name, 'failed')
             raise ReleaseError(name, str(error), completed) from error
         completed.append(name)
+        if on_stage is not None:
+            on_stage(name, 'ok')
         return result
 
     step('preflight', lambda: gateway.preflight(plan))

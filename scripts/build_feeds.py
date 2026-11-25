@@ -38,8 +38,10 @@ REQUIRED = ('repository', 'feed', 'downloadPrefix', 'kind', 'asset',
             'minClientVersion', 'capabilities')
 
 
-def load_source(path=SOURCE):
-    document = json.loads(path.read_text(encoding='utf-8'))
+def load_source(path=None):
+    # Resolved at call time: the packaging configure step rebinds these module
+    # constants, and a default argument would freeze the pre-packaging path.
+    document = json.loads(Path(path or SOURCE).read_text(encoding='utf-8'))
     if document.get('format') != 2 or not isinstance(document.get('plugins'), dict):
         raise ValueError('registry 源格式无效。')
     return document['plugins']
