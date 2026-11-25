@@ -152,6 +152,13 @@ class ClaimTests(LabEnvironment):
 
 
 class FileSourceTests(LabEnvironment):
+    def test_missing_lab_credential_never_reads_keychain(self):
+        with patch.object(dc, '_read_keychain') as read:
+            with self.assertRaises(dc.CredentialError) as caught:
+                dc.read_raw()
+        self.assertEqual(caught.exception.code, 'auth.missing')
+        read.assert_not_called()
+
     def test_owner_only_file_is_accepted(self):
         path = self.write(signed(document()))
         raw, source = dc.read_raw(path)

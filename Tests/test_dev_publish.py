@@ -6,6 +6,7 @@ rebinding after the tool is packaged, the inspect/version decisions, the
 preview fingerprint and the lab-only working-copy sync.
 """
 import dataclasses
+import base64
 import json
 import os
 import subprocess
@@ -66,6 +67,12 @@ class EngineTestCase(unittest.TestCase):
         self.directory = tempfile.TemporaryDirectory(prefix='dev-publish-')
         self.addCleanup(self.directory.cleanup)
         self.root = Path(self.directory.name)
+        key = self.root / 'test-signing.key'
+        key.write_bytes(base64.b64encode(os.urandom(32)))
+        isolated = patch.dict(os.environ, {'ORDINA_DEV_LAB': '1',
+                                           'ORDINA_DEV_SIGN_KEY': str(key)})
+        isolated.start()
+        self.addCleanup(isolated.stop)
         self.repo = self.root / 'repo'
         (self.repo / 'plugins').mkdir(parents=True)
         self.registry = self.repo / 'plugins' / 'registry.source.json'

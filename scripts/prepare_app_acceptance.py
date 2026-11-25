@@ -1,11 +1,10 @@
 #!/usr/bin/env python3
 """Prepare a fully isolated real-App acceptance environment.
 
-Nothing here touches production: everything lives under one generated
-directory with its own HOME, its own loopback Registry, its own isolated
-publishing backend and a throwaway signing key. The real App is launched with
-that HOME, so its plugin installation state, credentials, journals and tool
-versions cannot reach the developer's real ~/Library data.
+The generated environment uses an isolated HOME, loopback Registry, lab
+backend, credential file and throwaway signing key. HOME alone does not isolate
+the macOS Keychain; only the explicitly configured lab credential and signer
+paths avoid the normal Keychain services.
 
     python3 scripts/prepare_app_acceptance.py
     bash dist/app-acceptance/start-registry.sh &   # keep it running
@@ -19,6 +18,7 @@ import argparse
 import base64
 import hashlib
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -113,7 +113,7 @@ def main():
         encoding='utf-8')
 
     # --- isolated trust chain -------------------------------------------
-    seed = hashlib.sha256(b'ordina real-app acceptance / 2026-11-25').digest()
+    seed = os.urandom(32)
     sign_key = credentials / 'lab-signing.key'
     sign_key.write_bytes(base64.b64encode(seed) + b'\n')
     sign_key.chmod(0o600)
@@ -259,7 +259,7 @@ def main():
 
     readme = f'''# 真实 App 隔离验收（简版）
 
-所有数据都在本目录的 `home/` 里，App 用这个 HOME 启动，**不会碰你真实的插件、凭据或钥匙串**。Registry、发布后端、签名密钥全部是一次性隔离环境，线上资源只读、不写入。
+插件数据和事务使用本目录的隔离 HOME；Registry、发布后端、签名密钥和授权文件使用独立的 lab 配置。HOME 本身不会隔离 macOS 钥匙串；仅在上述 lab 配置完整且使用 Debug App 时进行验收，缺少配置应停止操作。
 
 ## 准备（终端，4 条命令）
 
@@ -293,7 +293,7 @@ bash dist/app-acceptance/launch.sh                   # 启动真实 Debug App
 
 ```bash
 pkill -f app_acceptance_server.py
-# dist/app-acceptance 可以直接删除；真实 ~/Library 未被改动
+# 确认不再需要验收数据后，可删除 dist/app-acceptance
 ```
 
 生成时间：{time.strftime('%Y-%m-%d %H:%M:%S')}

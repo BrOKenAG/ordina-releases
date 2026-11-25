@@ -63,6 +63,8 @@ def read_raw(path=None):
         if mode & (stat.S_IRWXG | stat.S_IRWXO):
             _fail('auth.permissions', '授权文件权限过宽，需要 0600。')
         return candidate.read_text(encoding='utf-8').strip(), 'file'
+    if _is_lab():
+        _fail('auth.missing', '隔离环境缺少授权文件，已停止以避免访问钥匙串。')
     raw = _read_keychain()
     if not raw:
         _fail('auth.missing', '钥匙串中没有开发者授权（ordina-dev-publisher）。')
