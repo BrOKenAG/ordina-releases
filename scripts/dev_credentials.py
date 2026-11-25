@@ -73,6 +73,8 @@ def read_raw(path=None):
 
 def store(raw):
     """Verify before writing, then replace the Keychain item."""
+    if _is_lab():
+        _fail('auth.lab', '隔离环境不允许修改钥匙串。')
     verify_raw(raw)
     result = subprocess.run(
         ['/usr/bin/security', 'add-generic-password', '-U', '-s', KEYCHAIN_SERVICE,
@@ -84,6 +86,8 @@ def store(raw):
 
 
 def remove():
+    if _is_lab():
+        _fail('auth.lab', '隔离环境不允许修改钥匙串。')
     result = subprocess.run(
         ['/usr/bin/security', 'delete-generic-password', '-s', KEYCHAIN_SERVICE,
          '-a', KEYCHAIN_ACCOUNT], capture_output=True, text=True)

@@ -152,6 +152,14 @@ class ClaimTests(LabEnvironment):
 
 
 class FileSourceTests(LabEnvironment):
+    def test_lab_cannot_mutate_real_keychain(self):
+        with patch.object(dc.subprocess, 'run') as run:
+            with self.assertRaises(dc.CredentialError):
+                dc.store(signed(document()))
+            with self.assertRaises(dc.CredentialError):
+                dc.remove()
+            run.assert_not_called()
+
     def test_missing_lab_credential_never_reads_keychain(self):
         with patch.object(dc, '_read_keychain') as read:
             with self.assertRaises(dc.CredentialError) as caught:
