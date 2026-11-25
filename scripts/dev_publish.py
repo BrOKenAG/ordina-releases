@@ -958,6 +958,11 @@ def main():
               'error': {'code': 'backend.lab',
                         'message': '隔离后端只允许在 ORDINA_DEV_LAB=1 时使用。'}})
         sys.exit(1)
+    if lab_enabled() and options.backend == 'production' and options.command in ('publish', 'resume', 'rollback'):
+        emit({'type': 'result', 'ok': False,
+              'error': {'code': 'backend.lab',
+                        'message': '隔离授权不能用于生产发布。'}})
+        sys.exit(1)
     try:
         COMMANDS[options.command](options)
     except Failure as error:

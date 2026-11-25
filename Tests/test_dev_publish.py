@@ -333,6 +333,12 @@ class ContractTests(EngineTestCase):
         self.assertEqual(result.returncode, 1)
         self.assertEqual(payloads[-1]['error']['code'], 'backend.lab')
 
+    def test_lab_credentials_cannot_target_production_backend(self):
+        result, payloads = self.run_tool('publish', '--execute', '--zip', 'x.zip',
+                                         '--backend', 'production')
+        self.assertEqual(result.returncode, 1)
+        self.assertEqual(payloads[-1]['error']['code'], 'backend.lab')
+
 
 if __name__ == '__main__':
     unittest.main()

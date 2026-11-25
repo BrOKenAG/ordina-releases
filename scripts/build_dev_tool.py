@@ -28,7 +28,10 @@ MANIFEST_SOURCE = ROOT / 'dev-tool' / 'manifest.source.json'
 TOOL = 'ordina-publisher'
 # The declared version is baked into the entry point, so the archive reports
 # its own release number instead of the one in the checked-in source tree.
-ENTRY = '''import sys
+ENTRY = '''import os
+import sys
+if not {lab!r} and os.environ.get('ORDINA_DEV_LAB') == '1':
+    sys.exit('Production tool cannot run with lab enabled.')
 import dev_publish
 dev_publish.TOOL_VERSION = {version!r}
 if __name__ == '__main__':
@@ -68,7 +71,7 @@ def build(version, lab=False):
             info.create_system = 3
             archive.writestr(info, data)
 
-        add('__main__.py', ENTRY.format(version=version).encode('utf-8'))
+        add('__main__.py', ENTRY.format(version=version, lab=lab).encode('utf-8'))
         add('VERSION', f'{TOOL} {version}\n'.encode('utf-8'))
         for name in modules:
             path = ROOT / 'scripts' / name

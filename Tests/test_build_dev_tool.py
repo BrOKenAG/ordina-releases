@@ -7,7 +7,10 @@ production build must not contain the isolated lab backend or the lab signer.
 import hashlib
 import io
 import json
+import os
+import subprocess
 import sys
+import tempfile
 import unittest
 import zipfile
 from pathlib import Path
@@ -22,6 +25,16 @@ def names(data):
 
 
 class BuildTests(unittest.TestCase):
+    def test_production_archive_rejects_lab_environment(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / 'tool.pyz'
+            path.write_bytes(bdt.build('1.0.0'))
+            env = dict(os.environ, ORDINA_DEV_LAB='1')
+            result = subprocess.run([sys.executable, str(path), 'hello'], env=env,
+                                    capture_output=True, text=True)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn('lab', result.stderr.lower())
+
     def test_build_is_deterministic(self):
         first = bdt.build('1.0.0')
         second = bdt.build('1.0.0')
