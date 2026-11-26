@@ -144,6 +144,11 @@ enum PluginProtocol {
     private struct RegistryPayload: Decodable {
         let format: Int
         let plugins: [String: PluginRegistryEntry]
+        let withdrawn: [String]?
+    }
+    struct RegistrySnapshot: Sendable {
+        let plugins: [String: PluginRegistryEntry]
+        let withdrawn: Set<String>
     }
     private struct ReleasePayload: Decodable {
         let format: Int
@@ -230,9 +235,18 @@ enum PluginProtocol {
 
     static func verifiedRegistry(_ data: Data, publicKey: Data,
                                  policy: PluginPolicy) throws -> [String: PluginRegistryEntry] {
+        try verifiedRegistrySnapshot(data, publicKey: publicKey, policy: policy).plugins
+    }
+
+    static func verifiedRegistrySnapshot(_ data: Data, publicKey: Data,
+                                         policy: PluginPolicy) throws -> RegistrySnapshot {
         let payload = try verifiedPayload(data, publicKey: publicKey)
         let document = try JSONDecoder().decode(RegistryPayload.self, from: payload)
         guard document.format == 2 else { throw Failure.invalid }
+        let withdrawn = document.withdrawn ?? []
+        guard withdrawn.count <= 1000, Set(withdrawn).count == withdrawn.count,
+              withdrawn.allSatisfy({ validID($0) && document.plugins[$0] == nil })
+        else { throw Failure.invalid }
         var result: [String: PluginRegistryEntry] = [:]
         for (id, entry) in document.plugins {
             guard validID(id), entry.protocolVersion == 2,
@@ -250,7 +264,7 @@ enum PluginProtocol {
             else { throw Failure.invalid }
             result[id] = entry
         }
-        return result
+        return RegistrySnapshot(plugins: result, withdrawn: Set(withdrawn))
     }
 
     static func signedRelease(_ data: Data, pluginID: String, publicKey: Data,

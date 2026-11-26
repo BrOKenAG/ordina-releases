@@ -170,11 +170,18 @@ struct OptionalPluginsView: View {
                     ProgressView().controlSize(.small).tint(OrdinaTokens.accent)
                         .accessibilityLabel("正在安装 \(item.name)")
                 }
-                Text(state.installing ? "安装中…" : state.status.title)
+                Text(state.installing ? "安装中…" : (item.isWithdrawn ? "已下架" : state.status.title))
                     .font(OrdinaTokens.type(12))
                     .foregroundStyle(state.status == .current && !state.installing
                                      ? OrdinaTokens.success : OrdinaTokens.secondary)
-                if state.status == .incompatible {
+                if item.isWithdrawn && item.isInstalled && !state.installing {
+                    Menu {
+                        Button("在 Finder 中显示") { reveal(item) }
+                        Button("卸载…") { confirmUninstall(item) }
+                    } label: { Image(systemName: "ellipsis").frame(width: 28, height: 28) }
+                    .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
+                    .accessibilityLabel(item.name + " 操作")
+                } else if state.status == .incompatible {
                     Text("≥ \(item.minClientVersion)")
                         .font(OrdinaTokens.type(11))
                         .foregroundStyle(OrdinaTokens.secondary)

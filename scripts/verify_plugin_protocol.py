@@ -44,7 +44,7 @@ SOURCES = [
     'Tests/PluginClientHarness.swift',
 ]
 CHECKS = (
-    'discovery', 'install_new_plugin', 'update_new_plugin', 'uninstall_new_plugin',
+    'discovery', 'install_new_plugin', 'withdrawn_plugin', 'update_new_plugin', 'uninstall_new_plugin',
     'offline_cache', 'registry_unavailable', 'bad_signature', 'corrupt_asset',
     'incompatible_client', 'interrupted_install', 'regression_minutes',
     'regression_multicam', 'regression_yueliu',
@@ -168,8 +168,10 @@ class LabFeed:
         }
         return entry
 
-    def sign(self, tamper=False):
+    def sign(self, tamper=False, withdrawn=()):
         payload = {'format': 2, 'plugins': self.entries}
+        if withdrawn:
+            payload['withdrawn'] = list(withdrawn)
         data = envelope_bytes(payload)
         if tamper:
             envelope = json.loads(data)
@@ -380,6 +382,30 @@ def main():
             require(entry['status'] == 'current:1.0.0', f'status {entry["status"]}')
             return {'installedFiles': len(recorded['files'])}
         check('install_new_plugin', install_new_plugin)
+
+        def withdrawn_plugin():
+            saved = feed.entries.pop('demo-notes')
+            feed.sign(withdrawn=['demo-notes'])
+            try:
+                code, payload = run(harness, home, port, 'list')
+                current = item(payload, 'demo-notes')
+                require(code == 0 and current['installed'] and current['withdrawn'],
+                        f'installed withdrawn status missing: {payload}')
+                require(not current['canInstall'], 'withdrawn plugin can be installed')
+                fresh = workspace / 'home-withdrawn'
+                fresh.mkdir()
+                _, payload = run(harness, fresh, port, 'list')
+                require(item(payload, 'demo-notes') is None, 'withdrawn plugin was discoverable')
+                code, _ = run(harness, fresh, port, 'install', 'demo-notes')
+                require(code != 0, 'withdrawn plugin was installable')
+                code, _ = run(harness, home, port, 'uninstall', 'demo-notes')
+                require(code == 0, 'withdrawn plugin could not be uninstalled')
+            finally:
+                feed.entries['demo-notes'] = saved
+                feed.sign()
+            code, _ = run(harness, home, port, 'install', 'demo-notes')
+            require(code == 0, 'republished plugin could not be installed')
+        check('withdrawn_plugin', withdrawn_plugin)
 
         def update_new_plugin():
             publish_demo('1.1.0', 'v2')

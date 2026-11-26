@@ -111,6 +111,14 @@ def documents(plugins):
         'format': 2,
         'plugins': {name: registry_descriptor(name, meta) for name, meta in live.items()},
     }
+    # The existing `plugins` map remains published-only for older clients.
+    # `everPublished` is historical metadata, not a second publication state.
+    withdrawn = sorted(name for name, meta in plugins.items()
+                       if not meta.get('published') and meta.get('everPublished') is True)
+    if withdrawn:
+        if any(not protocol.valid_id(name) for name in withdrawn):
+            raise ValueError('已下架插件标识无效。')
+        registry['withdrawn'] = withdrawn
     entries = {name: entry(name, meta) for name, meta in live.items()}
     # Freeze legacy entries at versions that exist in the original release
     # repository. Old clients reject per-plugin repository paths.

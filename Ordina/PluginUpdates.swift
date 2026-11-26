@@ -4,7 +4,7 @@ import Foundation
 // or file list is known here: the bootstrap registry is the only fixed address.
 enum PluginUpdates {
     private static let lock = NSLock()
-    private static var memoryCache: [String: (fetched: Date, entries: [String: PluginRegistryEntry])] = [:]
+    private static var memoryCache: [String: (fetched: Date, snapshot: PluginProtocol.RegistrySnapshot)] = [:]
     private static let cacheLifetime: TimeInterval = 7 * 24 * 60 * 60
     private static let memoryLifetime: TimeInterval = 300
 
@@ -15,13 +15,14 @@ enum PluginUpdates {
     }
 
     static func registry(forceRefresh: Bool = false,
-                         environment: PluginEnvironment = .current) throws -> [String: PluginRegistryEntry] {
+                         allowOfflineCache: Bool = true,
+                         environment: PluginEnvironment = .current) throws -> PluginProtocol.RegistrySnapshot {
         lock.lock()
         defer { lock.unlock() }
         let key = environment.registryURL.absoluteString
         if !forceRefresh, let cached = memoryCache[key],
            Date().timeIntervalSince(cached.fetched) < memoryLifetime {
-            return cached.entries
+            return cached.snapshot
         }
         let data: Data
         do {
@@ -30,13 +31,13 @@ enum PluginUpdates {
         } catch {
             // A network failure may reuse a previously *verified* cache. A
             // signature failure below never falls back to stale content.
-            if let cached = diskCache(environment), cached.count > 0 {
+            if allowOfflineCache, let cached = diskCache(environment) {
                 memoryCache[key] = (Date(), cached)
                 return cached
             }
             throw PluginProtocol.Failure.unavailable
         }
-        let entries = try PluginProtocol.verifiedRegistry(
+        let entries = try PluginProtocol.verifiedRegistrySnapshot(
             data, publicKey: environment.publicKey, policy: environment.policy)
         memoryCache[key] = (Date(), entries)
         storeDiskCache(data, environment: environment)
@@ -64,13 +65,13 @@ enum PluginUpdates {
         return try PluginProtocol.unpack(data, release: release)
     }
 
-    private static func diskCache(_ environment: PluginEnvironment) -> [String: PluginRegistryEntry]? {
+    private static func diskCache(_ environment: PluginEnvironment) -> PluginProtocol.RegistrySnapshot? {
         guard let raw = try? Data(contentsOf: environment.cacheFile),
               let record = try? JSONDecoder().decode(DiskCache.self, from: raw),
               record.registry == environment.registryURL.absoluteString,
               Date().timeIntervalSince1970 - record.fetchedAt < cacheLifetime,
               let envelope = Data(base64Encoded: record.envelope),
-              let entries = try? PluginProtocol.verifiedRegistry(
+              let entries = try? PluginProtocol.verifiedRegistrySnapshot(
                 envelope, publicKey: environment.publicKey, policy: environment.policy)
         else { return nil }
         return entries

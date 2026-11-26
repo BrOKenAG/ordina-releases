@@ -89,6 +89,16 @@ struct VerifyPluginProtocol {
         let entries = try PluginProtocol.verifiedRegistry(validRegistry, publicKey: publicKey,
                                                           policy: policy)
         precondition(entries["demo"]?.name == "Demo")
+        let tombstone = try envelope(["format": 2, "plugins": [:], "withdrawn": ["demo"]])
+        let snapshot = try PluginProtocol.verifiedRegistrySnapshot(tombstone, publicKey: publicKey,
+                                                                   policy: policy)
+        precondition(snapshot.withdrawn == ["demo"] && snapshot.plugins.isEmpty)
+        expectFailure("overlapping withdrawn plugin") {
+            let conflicting = try envelope(["format": 2, "plugins": ["demo": registryEntry()],
+                                            "withdrawn": ["demo"]])
+            _ = try PluginProtocol.verifiedRegistrySnapshot(conflicting, publicKey: publicKey,
+                                                             policy: policy)
+        }
         expectFailure("registry wrong key") {
             _ = try PluginProtocol.verifiedRegistry(validRegistry, publicKey: otherKey, policy: policy)
         }

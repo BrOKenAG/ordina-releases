@@ -16,9 +16,10 @@ enum PluginCatalog {
         let release: PluginRelease?
         let status: PluginInstallStatus
         let error: String?
+        var isWithdrawn = false
 
         var isInstalled: Bool { status.isInstalled }
-        var canInstall: Bool { release != nil && descriptor != nil }
+        var canInstall: Bool { !isWithdrawn && release != nil && descriptor != nil }
         var needsBrowserExtension: Bool {
             capabilities.contains(.chromeUnpackedExtension)
         }
@@ -31,15 +32,21 @@ enum PluginCatalog {
 
     static func load(environment: PluginEnvironment = .current) -> LoadResult {
         var entries: [String: PluginRegistryEntry] = [:]
+        var withdrawn: Set<String> = []
         var registryError: String?
         do {
-            entries = try PluginUpdates.registry(environment: environment)
+            let snapshot = try PluginUpdates.registry(environment: environment)
+            entries = snapshot.plugins
+            withdrawn = snapshot.withdrawn
         } catch {
             registryError = "无法获取插件目录：\(error.localizedDescription)"
         }
         var items: [String: Item] = [:]
         // Installed records remain visible even when the registry is offline.
         items = installedItems(environment: environment)
+        for id in withdrawn where items[id] != nil {
+            items[id]?.isWithdrawn = true
+        }
         for (id, entry) in entries {
             let installed = items[id]
             items[id] = resolve(id: id, entry: entry, installed: installed,
@@ -113,6 +120,13 @@ enum PluginOperations {
         guard let release = item.release else {
             throw PluginProtocol.Failure.notPublished
         }
+        let current = try PluginUpdates.registry(forceRefresh: true, allowOfflineCache: false,
+                                                 environment: environment)
+        guard let entry = current.plugins[item.id], !current.withdrawn.contains(item.id) else {
+            throw PluginProtocol.Failure.notPublished
+        }
+        let verified = try PluginUpdates.release(id: item.id, entry: entry, environment: environment)
+        guard verified == release else { throw PluginProtocol.Failure.unavailable }
         let files = try PluginUpdates.files(for: release, environment: environment)
         try PluginInstaller.install(release, files: files, environment: environment)
     }

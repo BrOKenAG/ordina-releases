@@ -40,7 +40,10 @@ struct PluginClientHarness {
                 emit(["ok": true, "installed": id, "version": item.version])
             case "uninstall":
                 let id = try pluginID(arguments)
-                let item = try loadItem(id, environment: environment)
+                let result = PluginCatalog.load(environment: environment)
+                guard let item = result.items.first(where: { $0.id == id }) else {
+                    throw Failure(description: "unknown plugin: \(id)")
+                }
                 try PluginOperations.uninstall(item, environment: environment)
                 emit(["ok": true, "uninstalled": id])
             default:
@@ -89,6 +92,7 @@ struct PluginClientHarness {
             "capabilities": item.capabilities.map(\.rawValue),
             "installed": item.isInstalled,
             "canInstall": item.canInstall,
+            "withdrawn": item.isWithdrawn,
             "status": status,
             "error": item.error as Any? ?? NSNull(),
         ]

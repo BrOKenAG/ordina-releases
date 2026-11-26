@@ -97,6 +97,17 @@ class FeedDerivationTests(unittest.TestCase):
         self.assertNotIn('yueliu', legacy['plugins'])
         self.assertNotIn('yueliu', per_plugin)
 
+    def test_withdrawn_ids_are_signed_outside_legacy_plugin_map(self):
+        plugins = copy.deepcopy(self.plugins)
+        plugins['minutes']['published'] = False
+        plugins['minutes']['everPublished'] = True
+        registry, legacy, feeds = bf.documents(plugins)
+        self.assertNotIn('minutes', registry['plugins'])
+        self.assertIn('minutes', registry['withdrawn'])
+        self.assertNotIn('yueliu', registry['withdrawn'])
+        self.assertNotIn('minutes', legacy['plugins'])
+        self.assertNotIn('minutes', feeds)
+
 
 if __name__ == '__main__':
     unittest.main()
