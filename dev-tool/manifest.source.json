@@ -24,6 +24,17 @@
       "tag": "dev-tool-v1.1.0",
       "url": "https://github.com/BrOKenAG/ordina-releases/releases/download/dev-tool-v1.1.0/ordina-publisher-1.1.0.pyz",
       "notes": ""
+    },
+    {
+      "version": "1.2.0",
+      "protocol": 1,
+      "minClientVersion": "1.10.0",
+      "asset": "ordina-publisher-1.2.0.pyz",
+      "sha256": "b882c404759e1b84c2e70353471a22bca3742d9faa925a1accd159eb844ae53f",
+      "size": 68727,
+      "tag": "dev-tool-v1.2.0",
+      "url": "https://github.com/BrOKenAG/ordina-releases/releases/download/dev-tool-v1.2.0/ordina-publisher-1.2.0.pyz",
+      "notes": ""
     }
   ]
 }

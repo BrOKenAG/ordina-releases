@@ -45,7 +45,7 @@ import publish_plugin
 from release_transaction import LocalGateway, ReleaseError
 
 TOOL = 'ordina-publisher'
-TOOL_VERSION = '1.1.0'
+TOOL_VERSION = '1.2.0'
 PROTOCOL = 1
 MIN_CLIENT = '1.10.0'
 MAX_NOTES = 2000
@@ -1116,6 +1116,40 @@ def command_lifecycle_set(options):
         'version': change['version'], 'published': change['published']})
 
 
+def command_auth_authorize(options):
+    """Read-only proof of release authority; never grants the engine authority."""
+    import re
+    root = environment_repository(required=True)
+    source = lifecycle_source(options, root)
+    entries = source.get('plugins', {}) if isinstance(source, dict) else {}
+    if not isinstance(entries, dict):
+        raise Failure('auth.repository', '插件目录无效。')
+    candidates = sorted({item.get('repository') for key, item in entries.items()
+                         if isinstance(key, str) and isinstance(item, dict)
+                         and item.get('repository') == 'BrOKenAG/ordina-plugin-' + key
+                         and re.fullmatch(r'[a-z][a-z0-9-]{0,31}', key)})
+    last_error = None
+    for repository in candidates:
+        try:
+            if options.backend == 'production':
+                if lab_enabled():
+                    raise Failure('auth.lab', '隔离授权不能用于生产。')
+                production_authorize(options, repository)
+            else:
+                if not lab_enabled():
+                    raise Failure('auth.lab', '隔离环境未启用。')
+                credential(options, repository)
+                from feed_signing import sign_document
+                sign_document({'purpose': 'ordina-lab-auth', 'nonce': secrets.token_hex(32)})
+            ok({'authorized': True})
+            return
+        except (Failure, ValueError, OSError) as error:
+            last_error = error
+    if isinstance(last_error, Failure):
+        raise last_error
+    raise Failure('auth.unavailable', '无法确认发布权限及可信签名能力。')
+
+
 def command_credential_status(options):
     ok(dev_credentials.status(options.credentials or env('ORDINA_DEV_CREDENTIALS')))
 
@@ -1142,6 +1176,7 @@ COMMANDS = {
     'hello': command_hello,
     'doctor': command_doctor,
     'credential-status': command_credential_status,
+    'auth-authorize': command_auth_authorize,
     'credential-import': command_credential_import,
     'inspect': command_inspect,
     'local-test': command_local_test,

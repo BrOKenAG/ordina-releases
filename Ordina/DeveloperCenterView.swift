@@ -1,4 +1,5 @@
 import SwiftUI
+import Combine
 import AppKit
 import UniformTypeIdentifiers
 
@@ -8,6 +9,9 @@ import UniformTypeIdentifiers
 @MainActor
 struct DeveloperCenterView: View {
     @StateObject private var model = DeveloperCenterModel()
+    @StateObject private var auth = DeveloperAuthentication()
+    @State private var configuringAuthentication = false
+    @State private var confirmingRevoke = false
     @Environment(\.dismiss) private var dismiss
     @State private var selectingPackage = false
     @State private var selectingCredential = false
@@ -25,6 +29,18 @@ struct DeveloperCenterView: View {
             header
             if !model.configuration.enabled {
                 enablePanel
+            } else if !auth.unlocked && !configuringAuthentication {
+                DeveloperAuthenticationView(auth: auth, configuration: model.configuration) {
+                    configuringAuthentication = true
+                }
+            } else if !auth.unlocked {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 12) {
+                        Button("返回验证") { configuringAuthentication = false }
+                            .buttonStyle(PaperQuietButton())
+                        toolPanel
+                    }.padding(.horizontal, 24)
+                }
             } else {
                 Picker("", selection: $model.tab) {
                     Text("发布").tag(0)
@@ -49,7 +65,13 @@ struct DeveloperCenterView: View {
         }
         .frame(width: 760, height: 720)
         .background(Paper.background).foregroundStyle(Paper.ink)
-        .task { await model.load() }
+        .task { auth.load(); await model.load() }
+        .onReceive(Timer.publish(every: 1, on: .main, in: .common).autoconnect()) { _ in auth.tick() }
+        .onDisappear { auth.lock() }
+        .confirmationDialog("撤销本机认证？", isPresented: $confirmingRevoke, titleVisibility: .visible) {
+            Button("撤销认证", role: .destructive) { Task { await auth.revoke(model.configuration) } }
+            Button("取消", role: .cancel) {}
+        } message: { Text("撤销后需要重新绑定验证器。") }
         .fileImporter(isPresented: $selectingPackage,
                       allowedContentTypes: [.zip], allowsMultipleSelection: false) { result in
             if case .success(let urls) = result, let url = urls.first {
@@ -92,6 +114,10 @@ struct DeveloperCenterView: View {
                     .foregroundStyle(model.toolState.level == .ready ? Paper.success : Paper.secondary)
             }
             Spacer()
+            if auth.unlocked {
+                Button("锁定") { auth.lock() }.buttonStyle(PaperQuietButton())
+                Button("撤销认证") { confirmingRevoke = true }.buttonStyle(PaperQuietButton())
+            }
             if model.busy { ProgressView().controlSize(.small).tint(Paper.accent) }
             Button { dismiss() } label: { Image(systemName: "xmark") }
                 .buttonStyle(PaperQuietButton()).help("关闭").accessibilityLabel("关闭")

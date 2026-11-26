@@ -1,14 +1,14 @@
 {
   "format": 1,
-  "generatedAt": "2026-11-26T04:46:43Z",
+  "generatedAt": "2026-11-26T09:37:32Z",
   "passed": true,
   "checks": {
     "debug": "pass",
     "release": "pass"
   },
   "sourceCount": {
-    "debug": 35,
-    "release": 35
+    "debug": 39,
+    "release": 39
   },
   "upcomingFeatures": [
     "DisableOutwardActorInference",

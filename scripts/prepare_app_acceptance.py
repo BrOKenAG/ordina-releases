@@ -297,7 +297,8 @@ kill "$registry_pid"
 `#if DEBUG || ORDINA_LAB` 编译条件；Release 构建会把这些分支编译剔除，App 会静默回落到
 正式 Pages / Registry / 生产公钥，隔离验收就不再是隔离的。
 `launch.sh` 使用从当前 Debug 构建复制的独立验收 App，不能传入其他 App。
-验收副本使用独立偏好设置域 `{preference_domain}`；HOME 本身不隔离钥匙串。
+验收副本使用独立偏好设置域 `{preference_domain}` 和独立钥匙串服务 `{preference_domain}.developer-totp`；HOME 本身不隔离钥匙串。
+TOTP 仅保护本机交互，实际发布仍由发布引擎独立验证权限和签名。
 
 （`local_xcode_build.sh` 必须在 macOS 原生「终端」App 里跑；agent 会话的 `sandbox-exec` 限制无法完成 Xcode 构建。
 正式 1.10.0 出包另用 `bash scripts/local_xcode_build.sh --all`，与本次隔离验收分开。）
@@ -306,11 +307,14 @@ kill "$registry_pid"
 
 1. 首页插件入口 → 安装 Demo Lab Notes，关闭插件页。
 2. 设置 → 连点版本号 **10 次** →「测试选项」→ 开发者中心并启用。
-3. 「工具」→ 选择发布仓库 `{repo}` → 检查更新并安装 1.1.0 →「管理」→ 刷新。
-4. 「管理」→ Demo Lab Notes →「下架」→ 确认；应显示“已下架”。
-5. 关闭开发者中心，首页插件入口刷新：已安装插件显示“已下架”，仍可卸载；卸载后刷新，不再显示该插件。
-6. 返回开发者中心 →「管理」→「重新上架」→ 确认；首页插件入口刷新后可再次安装。
-7. 「管理」中的事务记录可用于恢复中断的操作或回滚已完成操作。
+3. 「配置发布工具」→ 选择发布仓库 `{repo}` → 检查更新并安装 1.1.0 → 返回验证。
+4. 「绑定验证器」→ 手机扫码 → 输入六位验证码；解锁后可使用开发者中心。
+5. 点击「锁定」后，等待新的验证码，再输入解锁；「重新绑定」需要再次验证隔离发布凭据。
+6. 「撤销认证」清除本机绑定；不会删除发布事务。
+7. 「管理」→ Demo Lab Notes →「下架」→ 确认；应显示“已下架”。
+8. 关闭开发者中心，首页插件入口刷新：已安装插件显示“已下架”，仍可卸载；卸载后刷新，不再显示该插件。
+9. 返回开发者中心 →「管理」→「重新上架」→ 确认；首页插件入口刷新后可再次安装。
+10. 「管理」中的事务记录可用于恢复中断的操作或回滚已完成操作。
 
 ## 测试中断恢复
 
@@ -328,6 +332,7 @@ ORDINA_DEV_LAB_FAIL_AFTER=1 bash "{out}/launch.sh"
 
 ```bash
 defaults delete {preference_domain}
+security delete-generic-password -s "{preference_domain}.developer-totp" -a totp
 # 确认不再需要验收数据后，可删除 dist/app-acceptance
 ```
 

@@ -245,6 +245,15 @@ struct LocalPublisherTool: DeveloperPublishing {
         try DevBridge.decode(type, from: data)
     }
 
+    func authorizeIdentity() async throws {
+        try await Task.detached(priority: .userInitiated) {
+            let result = try call(["auth-authorize"], timeout: 90)
+            guard result["authorized"] as? Bool == true else {
+                throw DevBridgeError.response("无法确认开发者发布权限。")
+            }
+        }.value
+    }
+
     func helloSync() throws -> DevToolInfo {
         try value(DevToolInfo.self, from: call(["hello"], timeout: 20))
     }

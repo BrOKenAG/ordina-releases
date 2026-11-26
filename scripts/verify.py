@@ -32,6 +32,7 @@ checks = {
     'VerifyNaming': ['ResolveService'],
     'VerifyDestination': ['ResolveService', 'DestinationBookmark'],
     'VerifyDeveloperTOTP': ['DeveloperTOTP'],
+    'VerifyDeveloperAuthState': ['DeveloperAuthState', 'DeveloperAuthKeychain'],
     'VerifyIntegration': ['ResolveService', 'IntegrationInstaller'],
     'VerifyPluginProtocol': ['PluginProtocol'],
     'VerifyPluginInstaller': ['PluginProtocol', 'PluginEnvironment', 'PluginInstaller'],
