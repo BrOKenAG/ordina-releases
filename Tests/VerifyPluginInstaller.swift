@@ -240,6 +240,17 @@ struct VerifyPluginInstaller {
         try require(try manager.contentsOfDirectory(atPath: elsewhere.path).isEmpty,
                     "linked install wrote outside home")
 
+        // A failure committing the installation record must undo every file.
+        let failingHome = root.appendingPathComponent("record-failure-home")
+        let failing = PluginEnvironment.lab(registryURL: URL(string: "http://127.0.0.1:1/registry.json")!,
+                                            host: "127.0.0.1", publicKey: Data(), home: failingHome,
+                                            clientVersion: "1.9.6")
+        try manager.createDirectory(at: failing.stateFile("demo"), withIntermediateDirectories: true)
+        try expectFailure("state commit failure was accepted") {
+            try PluginInstaller.install(first, files: data, environment: failing)
+        }
+        try require(!manager.fileExists(atPath: failing.utilityDirectory.appendingPathComponent("demo.py").path),
+                    "record failure left plugin files installed")
         print("Plugin installer: capabilities, update, rollback, uninstall and migration passed")
     }
 }

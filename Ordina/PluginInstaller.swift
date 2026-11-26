@@ -182,6 +182,19 @@ enum PluginInstaller {
                 }
                 applied.append((target, saved, exists))
             }
+
+            let recorded = staged.map {
+                InstalledFile(target: $0.relative, sha256: PluginProtocol.digest($0.data),
+                              role: $0.role.rawValue, executable: $0.executable)
+            }
+            let marker = legacyMarker(descriptor, environment: environment)?.path
+            let record = InstalledPlugin(id: descriptor.id, version: descriptor.version,
+                                         descriptor: descriptor, files: recorded,
+                                         installedAt: Date().timeIntervalSince1970,
+                                         legacyMarker: marker)
+            try manager.createDirectory(at: stateDirectory, withIntermediateDirectories: true)
+            let encoded = try JSONEncoder().encode(record)
+            try encoded.write(to: environment.stateFile(descriptor.id), options: .atomic)
         } catch {
             // Roll back in reverse order: restore backups, remove new files.
             for record in applied.reversed() {
@@ -193,19 +206,6 @@ enum PluginInstaller {
             }
             throw Failure.writeFailed(error.localizedDescription)
         }
-
-        let recorded = staged.map {
-            InstalledFile(target: $0.relative, sha256: PluginProtocol.digest($0.data),
-                          role: $0.role.rawValue, executable: $0.executable)
-        }
-        let marker = legacyMarker(descriptor, environment: environment)?.path
-        let record = InstalledPlugin(id: descriptor.id, version: descriptor.version,
-                                     descriptor: descriptor, files: recorded,
-                                     installedAt: Date().timeIntervalSince1970,
-                                     legacyMarker: marker)
-        try manager.createDirectory(at: stateDirectory, withIntermediateDirectories: true)
-        let encoded = try JSONEncoder().encode(record)
-        try encoded.write(to: environment.stateFile(descriptor.id), options: .atomic)
 
         // Remove pre-protocol names only after the new install is recorded.
         for name in descriptor.legacyNames ?? [] {
