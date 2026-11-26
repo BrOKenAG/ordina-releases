@@ -32,6 +32,16 @@ VECTORS = (
 
 
 class VectorTests(unittest.TestCase):
+    def test_production_verifier_matches_rfc_vectors_and_rejects_tampering(self):
+        import ed25519_verify
+        for _, key_hex, message_hex, signature_hex in VECTORS:
+            key, message, signature = map(bytes.fromhex, (key_hex, message_hex, signature_hex))
+            self.assertTrue(ed25519_verify.verify(key, message, signature))
+            self.assertFalse(ed25519_verify.verify(key, message + b'x', signature))
+            self.assertFalse(ed25519_verify.verify(key, message,
+                                                   signature[:-1] + bytes([signature[-1] ^ 1])))
+        self.assertFalse(ed25519_verify.verify(b'\x01' + b'\0' * 31, b'', b'\0' * 64))
+
     def test_public_key_and_signature_match_rfc8032(self):
         for seed_hex, key_hex, message_hex, signature_hex in VECTORS:
             seed = bytes.fromhex(seed_hex)
@@ -128,6 +138,48 @@ class FeedSigningTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, '实验室签名密钥'):
                 feed_signing.envelope_bytes({'format': 1})
             tool.assert_not_called()
+
+    def test_production_rejects_signature_by_untrusted_local_key(self):
+        import os
+        from unittest.mock import patch
+        import feed_signing
+        payload = b'{"format":1}'
+        raw = json.dumps({'payload': base64.b64encode(payload).decode(),
+                          'signature': base64.b64encode(lab_signing.signature(self.seed, payload)).decode()})
+        with patch.dict(os.environ, {'ORDINA_DEV_LAB': '0'}, clear=True), \
+             patch.object(feed_signing, 'sign_tool'), \
+             patch.object(feed_signing.subprocess, 'run') as run:
+            run.return_value.returncode = 0
+            with self.assertRaises(ValueError):
+                feed_signing.verify_envelope(raw)
+
+    def test_official_key_verifies_committed_registry_without_keychain(self):
+        import os
+        import plistlib
+        from unittest.mock import patch
+        import feed_signing
+        with (ROOT / 'config' / 'Info.plist').open('rb') as stream:
+            public = plistlib.load(stream)['SUPublicEDKey']
+        self.assertEqual(base64.b64encode(feed_signing.PRODUCTION_PUBLIC_KEY).decode(), public)
+        with patch.dict(os.environ, {'ORDINA_DEV_LAB': '0'}, clear=True), \
+             patch.object(feed_signing, 'sign_tool') as tool:
+            document = feed_signing.verify_envelope((ROOT / 'registry.json').read_bytes())
+            self.assertEqual(document['format'], 2)
+            tool.assert_not_called()
+
+    def test_production_signing_rejects_untrusted_local_key(self):
+        import os
+        from unittest.mock import patch
+        import feed_signing
+        signature = base64.b64encode(lab_signing.signature(
+            self.seed, feed_signing.canonical({'format': 1}))).decode()
+        with patch.dict(os.environ, {'ORDINA_DEV_LAB': '0'}, clear=True), \
+             patch.object(feed_signing, 'sign_tool'), \
+             patch.object(feed_signing.subprocess, 'run') as run:
+            run.return_value.returncode = 0
+            run.return_value.stdout = signature
+            with self.assertRaises(ValueError):
+                feed_signing.envelope_bytes({'format': 1})
 
 
 if __name__ == '__main__':

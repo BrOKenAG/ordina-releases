@@ -15,6 +15,8 @@ from pathlib import Path
 
 from sparkle_tools import ensure_tools, KEYCHAIN_ACCOUNT
 
+PRODUCTION_PUBLIC_KEY = base64.b64decode('90vua+GDSP8MSl6owCI/WSIkqBBuXO/AGw0ny4p67Bw=')
+
 
 def canonical(document):
     """Deterministic bytes: identical input always yields identical payload."""
@@ -71,6 +73,14 @@ def sign_document(document, tool=None):
                                capture_output=True, text=True)
         if check.returncode != 0:
             raise ValueError('签名自校验失败。')
+    import ed25519_verify
+    try:
+        trusted = ed25519_verify.verify(PRODUCTION_PUBLIC_KEY, data,
+                                        base64.b64decode(signature, validate=True))
+    except ValueError:
+        trusted = False
+    if not trusted:
+        raise ValueError('签名密钥与官方公钥不匹配。')
     return data, signature
 
 
@@ -96,15 +106,10 @@ def verify_envelope(raw, tool=None):
                                   base64.b64decode(signature, validate=True)):
             raise ValueError('清单签名无效。')
         return json.loads(payload)
-    tool = tool or sign_tool()
-    with tempfile.TemporaryDirectory(prefix='ordina-feed-verify-') as temporary:
-        path = Path(temporary) / 'payload.json'
-        path.write_bytes(payload)
-        result = subprocess.run([str(tool), '--account', KEYCHAIN_ACCOUNT,
-                                 '--verify', str(path), signature],
-                                capture_output=True, text=True)
-        if result.returncode != 0:
-            raise ValueError('清单签名无效。')
+    import ed25519_verify
+    if not ed25519_verify.verify(PRODUCTION_PUBLIC_KEY, payload,
+                                 base64.b64decode(signature, validate=True)):
+        raise ValueError('清单签名无效。')
     return json.loads(payload)
 
 
