@@ -133,6 +133,11 @@ def main():
         json.dumps({'format': 2, 'plugins': {}}, ensure_ascii=False, indent=2) + '\n',
         encoding='utf-8')
 
+    # Lab Keychain password is independent of signing keys and never used in production.
+    keychain_password = home / 'ordina-totp-keychain-password'
+    keychain_password.write_bytes(os.urandom(32))
+    keychain_password.chmod(0o600)
+
     # --- isolated trust chain -------------------------------------------
     seed = os.urandom(32)
     sign_key = credentials / 'lab-signing.key'
@@ -297,7 +302,7 @@ kill "$registry_pid"
 `#if DEBUG || ORDINA_LAB` 编译条件；Release 构建会把这些分支编译剔除，App 会静默回落到
 正式 Pages / Registry / 生产公钥，隔离验收就不再是隔离的。
 `launch.sh` 使用从当前 Debug 构建复制的独立验收 App，不能传入其他 App。
-验收副本使用独立偏好设置域 `{preference_domain}` 和独立钥匙串服务 `{preference_domain}.developer-totp`；HOME 本身不隔离钥匙串。
+验收副本使用独立偏好设置域 `{preference_domain}` 和本目录内独立测试钥匙串（服务 `{preference_domain}.developer-totp`）；HOME 本身不隔离钥匙串。
 TOTP 仅保护本机交互，实际发布仍由发布引擎独立验证权限和签名。
 
 （`local_xcode_build.sh` 必须在 macOS 原生「终端」App 里跑；agent 会话的 `sandbox-exec` 限制无法完成 Xcode 构建。
@@ -332,7 +337,7 @@ ORDINA_DEV_LAB_FAIL_AFTER=1 bash "{out}/launch.sh"
 
 ```bash
 defaults delete {preference_domain}
-security delete-generic-password -s "{preference_domain}.developer-totp" -a totp
+ # 测试钥匙串随验收目录一并清理
 # 确认不再需要验收数据后，可删除 dist/app-acceptance
 ```
 

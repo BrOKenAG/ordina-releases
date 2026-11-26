@@ -11,7 +11,17 @@ final class DeveloperAuthentication: ObservableObject {
     private var pending: Data?
     private var session = DeveloperAuthState()
     private var store: DeveloperAuthKeychain {
-        DeveloperAuthKeychain(service: (Bundle.main.bundleIdentifier ?? "com.ordina.app") + ".developer-totp")
+        let service = (Bundle.main.bundleIdentifier ?? "com.ordina.app") + ".developer-totp"
+        #if DEBUG || ORDINA_LAB
+        if DevBridge.isLab {
+            let root = DeveloperPaths.home
+            let path = root.appendingPathComponent("ordina-totp-test.keychain-db").path
+            let passwordPath = root.appendingPathComponent("ordina-totp-keychain-password")
+            return DeveloperAuthKeychain(service: service, isolatedPath: path,
+                                         isolatedPassword: try? Data(contentsOf: passwordPath))
+        }
+        #endif
+        return DeveloperAuthKeychain(service: service)
     }
 
     func load() {

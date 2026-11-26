@@ -138,6 +138,10 @@ def main():
                            check=True, capture_output=True)
             home = root / 'home'
             require(home.is_dir(), '隔离 HOME 不存在')
+            password = home / 'ordina-totp-keychain-password'
+            require(password.is_file() and len(password.read_bytes()) == 32
+                    and password.stat().st_mode & 0o077 == 0,
+                    '隔离测试钥匙串配置缺失或权限不安全')
             packages = sorted(path.name for path in (root / 'packages').glob('*.zip'))
             require(packages == ['brand-new-plugin.zip', 'corrupt.zip',
                                 'existing-plugin-update.zip', 'malicious.zip',
