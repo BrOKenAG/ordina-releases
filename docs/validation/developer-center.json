@@ -3,8 +3,9 @@
   "passed": true,
   "clientVersion": "1.10.0",
   "compiledOnce": true,
-  "harnessSha256": "ed27f1230d56ede2c380550e5cb72dbe19f8c1087d228ea9e3e5162c675ffae8",
-  "productionToolVersion": "1.0.0",
+  "harnessSha256": "079c9ef091d19ee86c09be348c7b0fcd3fa78913a55efe0831177b215a4df043",
+  "productionToolVersion": null,
+  "candidateToolVersion": "1.1.0",
   "labToolVersions": [
     "1.0.0",
     "1.1.0"
@@ -27,6 +28,10 @@
     "zip_bomb": "pass",
     "publish_new": "pass",
     "client_discovers_new_plugin": "pass",
+    "lifecycle_toggle": "pass",
+    "lifecycle_resume": "pass",
+    "lifecycle_rollback": "pass",
+    "lifecycle_unauthorized": "pass",
     "publish_update": "pass",
     "interrupted_publish": "pass",
     "concurrent_blocked": "pass",
@@ -71,7 +76,7 @@
       "uninstalled": true
     },
     "preview": {
-      "fingerprint": "b8ffd62c8b10",
+      "fingerprint": "6756c764f412",
       "checks": 6
     },
     "preview_stale": {
@@ -91,6 +96,19 @@
       "discovered": true,
       "installed": "1.0.0",
       "uninstalled": true
+    },
+    "lifecycle_toggle": {
+      "withdrawn": true,
+      "republished": true
+    },
+    "lifecycle_resume": {
+      "resumed": true
+    },
+    "lifecycle_rollback": {
+      "rolledBack": true
+    },
+    "lifecycle_unauthorized": {
+      "unchanged": true
     },
     "publish_update": {
       "previous": "1.0.0",
@@ -114,7 +132,7 @@
     "tool_update": {
       "from": "1.0.0",
       "to": "1.1.0",
-      "journals": 3
+      "journals": 8
     },
     "publish_after_tool_update": {
       "version": "1.3.0"
@@ -142,9 +160,9 @@
       "duplicateRecords": 0
     },
     "records_preserved": {
-      "records": 6,
-      "journals": 5
+      "records": 11,
+      "journals": 10
     }
   },
-  "timestamp": "2026-11-25T11:12:14Z"
+  "timestamp": "2026-11-26T04:47:03Z"
 }

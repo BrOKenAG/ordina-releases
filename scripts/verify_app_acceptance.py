@@ -20,7 +20,9 @@ import argparse
 import base64
 import hashlib
 import json
+import plistlib
 import socket
+import subprocess
 import sys
 import threading
 import time
@@ -62,6 +64,8 @@ def main():
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument('--root', type=Path, default=ROOT / 'dist' / 'app-acceptance')
     parser.add_argument('--report', type=Path, default=REPORT)
+    parser.add_argument('--launch-check', action='store_true',
+                        help='仅检查启动隔离边界，允许未完成事务留待恢复')
     args = parser.parse_args()
 
     root = args.root.resolve()
@@ -119,8 +123,19 @@ def main():
                     '默认启动 App 不是 Debug 产物')
             env = (root / 'env.sh').read_text(encoding='utf-8')
             for marker in ('ORDINA_PLUGIN_LAB=1', 'ORDINA_DEV_LAB=1',
-                           'ORDINA_DEV_BACKEND=lab', f'HOME="{root / "home"}"'):
+                           'ORDINA_DEV_BACKEND=lab', 'ORDO_UI_TEST=1',
+                           f'HOME="{root / "home"}"',
+                           f'ORDINA_DEV_CREDENTIALS="{root / "credentials/credential.json"}"',
+                           f'ORDINA_DEV_SIGN_KEY="{root / "credentials/lab-signing.key"}"'):
                 require(marker in env, f'env.sh 缺少 {marker}')
+            app = Path(summary['isolatedApp']).resolve()
+            require(app.is_relative_to(root), '验收 App 不在隔离目录内')
+            with (app / 'Contents/Info.plist').open('rb') as stream:
+                identity = plistlib.load(stream).get('CFBundleIdentifier', '')
+            require(identity == summary.get('preferencesDomain') and
+                    identity.startswith('com.ordina.acceptance.'), '验收偏好设置域无效')
+            subprocess.run(['/usr/bin/codesign', '--verify', '--deep', '--strict', str(app)],
+                           check=True, capture_output=True)
             home = root / 'home'
             require(home.is_dir(), '隔离 HOME 不存在')
             packages = sorted(path.name for path in (root / 'packages').glob('*.zip'))
@@ -166,7 +181,8 @@ def main():
             document = signed('/registry.json')
             require(document.get('format') == 2, 'Registry 不是 format 2')
             plugins = list(document.get('plugins', {}))
-            require('minutes-lab' in plugins, f'初始插件缺失：{plugins}')
+            require('minutes-lab' in plugins or 'minutes-lab' in document.get('withdrawn', []),
+                    f'初始插件缺失：{plugins}')
             for item in document['plugins'].values():
                 collected_urls.append(item['feed'])
                 collected_urls.append(item.get('downloadPrefix', ''))
@@ -175,6 +191,8 @@ def main():
         def plugin_manifest():
             document = signed('/ordina-plugin-minutes-lab/manifest-v2.json')
             entries = list(document.get('plugins', {}).values())
+            if not entries:
+                return {'withdrawn': True}
             require(len(entries) == 1, f'插件清单条目数异常：{len(entries)}')
             entry = entries[0]
             collected_urls.append(entry['url'])
@@ -188,7 +206,15 @@ def main():
 
         def plugin_asset():
             document = signed('/ordina-plugin-minutes-lab/manifest-v2.json')
-            entry = list(document['plugins'].values())[0]
+            entries = list(document['plugins'].values())
+            if not entries:
+                source = json.loads((root / 'repo/plugins/registry.source.json').read_text())
+                metadata = source['plugins']['minutes-lab']
+                entry = {'url': (f'{prefix}{metadata["repository"]}/releases/download/'
+                                 f'plugin-minutes-lab-v{metadata["version"]}/{metadata["asset"]}'),
+                         'sha256': metadata['sha256']}
+            else:
+                entry = entries[0]
             route = entry['url'].split(f'127.0.0.1:{port}', 1)[1]
             status, raw = get(route)
             require(status == 200, f'{route} 返回 {status}')
@@ -225,6 +251,8 @@ def main():
             ('plugin_asset', plugin_asset),
             ('no_production_urls', no_production_urls),
         ):
+            if args.launch_check and name in ('plugin_manifest', 'plugin_asset'):
+                continue
             check(name, function)
     finally:
         if server is not None:
@@ -248,7 +276,7 @@ def main():
     if not passed:
         sys.exit('隔离验收环境未通过：' + ', '.join(
             name for name, value in checks.items() if value != 'pass'))
-    print('ALL OK')
+    print('LAUNCH ISOLATION OK' if args.launch_check else 'ALL OK')
 
 
 if __name__ == '__main__':

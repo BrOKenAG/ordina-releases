@@ -54,11 +54,11 @@ PLUGIN_DIRS = [
 ]
 
 
-def sources():
+def sources(configuration):
     files = sorted(str(p) for p in (ROOT / "Ordina").rglob("*.swift"))
     # Xcode-generated asset symbols, if a prior build produced them.
-    for gen in sorted((ROOT / ".build").glob(
-            "**/DerivedSources/GeneratedAssetSymbols.swift")):
+    derived = ROOT / ".build/Build/Intermediates.noindex/Ordina.build" / configuration / "Ordina.build/DerivedSources"
+    for gen in sorted(derived.glob("GeneratedAssetSymbols.swift")):
         if str(gen) not in files:
             files.append(str(gen))
     return files
@@ -102,7 +102,6 @@ def typecheck(srcs, prods, debug):
 
 def main():
     pinned = assert_project_settings()
-    srcs = sources()
     prods = sparkle_products()
     if prods is None:
         raise SystemExit(
@@ -111,7 +110,10 @@ def main():
     checks = {}
     details = {}
     ok = True
+    source_counts = {}
     for label, debug in (("debug", True), ("release", False)):
+        srcs = sources("Debug" if debug else "Release")
+        source_counts[label] = len(srcs)
         rc, errors = typecheck(srcs, prods, debug)
         checks[label] = "pass" if rc == 0 and not errors else "fail"
         details[label] = {"returncode": rc, "errorCount": len(errors),
@@ -126,7 +128,7 @@ def main():
         "generatedAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "passed": ok,
         "checks": checks,
-        "sourceCount": len(srcs),
+        "sourceCount": source_counts,
         "upcomingFeatures": UPCOMING,
         "memberImportVisibilityPinnedInPbxproj": pinned,
         "sparkleProducts": str(prods),

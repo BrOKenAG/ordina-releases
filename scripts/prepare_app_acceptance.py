@@ -19,11 +19,13 @@ import base64
 import hashlib
 import json
 import os
+import plistlib
 import shutil
 import subprocess
 import sys
 import time
 import zipfile
+import uuid
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -46,6 +48,10 @@ TOOL_VERSIONS = ('1.0.0', '1.1.0')
 # out and would silently fall back to the production Pages/Registry/key, which
 # is exactly what this environment must never touch.
 DEBUG_APP = ROOT / '.build' / 'Build' / 'Products' / 'Debug' / 'ordina.app'
+
+
+def is_debug_app(path):
+    return Path(path).resolve() == DEBUG_APP.resolve()
 
 
 def tool_env(root, home, repo, labroot, sign_key, credential):
@@ -95,9 +101,11 @@ def main():
                         help='隔离验收必须指向 Debug 产物（lab 开关只在 DEBUG 构建生效）')
     args = parser.parse_args()
 
+    if not is_debug_app(args.app) or not args.app.is_dir():
+        sys.exit('请先构建当前工作区的 Debug App；隔离验收不接受其他 App。')
     out = args.output.resolve()
     if out.exists():
-        shutil.rmtree(out)
+        sys.exit('验收目录已存在，请选择新的 --output，避免覆盖已有数据。')
     home = out / 'home'
     repo = out / 'repo'
     labroot = out / 'labroot'
@@ -108,6 +116,19 @@ def main():
     for directory in (home, repo / 'plugins', labroot, packages, tools,
                       registry, credentials):
         directory.mkdir(parents=True, exist_ok=True)
+    # HOME does not isolate macOS preferences. Use a dedicated bundle identity
+    # for the Debug copy and disable normal startup services in this lab.
+    isolated_app = out / 'ordina-acceptance.app'
+    shutil.copytree(args.app, isolated_app, symlinks=True)
+    info_path = isolated_app / 'Contents/Info.plist'
+    with info_path.open('rb') as stream:
+        info = plistlib.load(stream)
+    preference_domain = 'com.ordina.acceptance.' + uuid.uuid4().hex
+    info['CFBundleIdentifier'] = preference_domain
+    with info_path.open('wb') as stream:
+        plistlib.dump(info, stream)
+    subprocess.run(['/usr/bin/codesign', '--force', '--deep', '--sign', '-', str(isolated_app)],
+                   check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     (repo / 'plugins' / 'registry.source.json').write_text(
         json.dumps({'format': 2, 'plugins': {}}, ensure_ascii=False, indent=2) + '\n',
         encoding='utf-8')
@@ -204,6 +225,7 @@ def main():
         '#!/bin/bash',
         '# 隔离验收环境：由 prepare_app_acceptance.py 生成，勿手工编辑',
         f'export HOME="{home}"',
+        'export ORDO_UI_TEST=1',
         'export NO_PROXY="localhost,127.0.0.1"',
         f'export ORDINA_CLIENT_VERSION="{CLIENT_VERSION}"',
         'export ORDINA_PLUGIN_LAB=1',
@@ -233,12 +255,13 @@ def main():
         '#!/bin/bash',
         'set -e',
         'source "$(dirname "$0")/env.sh"',
-        f'APP="${{1:-{args.app}}}"',
+        f'APP="{isolated_app}"',
         'if [[ ! -d "$APP" ]]; then',
         '  echo "缺少 Debug App：先运行 bash scripts/local_xcode_build.sh --debug" >&2',
         '  echo "隔离验收不能用 Release 构建（lab 开关被编译剔除，会回落到生产资源）" >&2',
         '  exit 1',
         'fi',
+        f'/usr/bin/python3 "{ROOT / "scripts" / "verify_app_acceptance.py"}" --launch-check --root "{out}" --report "{out / "launch-check.json"}"',
         'echo "隔离 HOME：$HOME"',
         'echo "验收 App：$APP（Debug 构建，lab 开关生效）"',
         f'echo "隔离 Registry：http://127.0.0.1:{args.port}/registry.json"',
@@ -261,38 +284,50 @@ def main():
 
 插件数据和事务使用本目录的隔离 HOME；Registry、发布后端、签名密钥和授权文件使用独立的 lab 配置。HOME 本身不会隔离 macOS 钥匙串；仅在上述 lab 配置完整且使用 Debug App 时进行验收，缺少配置应停止操作。
 
-## 准备（终端，4 条命令）
+## 启动（终端）
 
 ```bash
-bash scripts/local_xcode_build.sh --debug            # 完整 Xcode Debug 构建
-python3 scripts/prepare_app_acceptance.py            # 生成 dist/app-acceptance
-bash dist/app-acceptance/start-registry.sh &         # 隔离 Registry，保持运行
-bash dist/app-acceptance/launch.sh                   # 启动真实 Debug App
+bash "{out}/start-registry.sh" &
+registry_pid=$!
+bash "{out}/launch.sh"
+kill "$registry_pid"
 ```
 
 **必须用 `--debug`，不要用 `--release`。** 隔离 Registry、隔离公钥与 lab 后端全部依赖
 `#if DEBUG || ORDINA_LAB` 编译条件；Release 构建会把这些分支编译剔除，App 会静默回落到
 正式 Pages / Registry / 生产公钥，隔离验收就不再是隔离的。
-`launch.sh` 默认指向 `.build/Build/Products/Debug/ordina.app`，也可把 App 路径作为第一个参数传入。
+`launch.sh` 使用从当前 Debug 构建复制的独立验收 App，不能传入其他 App。
+验收副本使用独立偏好设置域 `{preference_domain}`；HOME 本身不隔离钥匙串。
 
 （`local_xcode_build.sh` 必须在 macOS 原生「终端」App 里跑；agent 会话的 `sandbox-exec` 限制无法完成 Xcode 构建。
 正式 1.10.0 出包另用 `bash scripts/local_xcode_build.sh --all`，与本次隔离验收分开。）
 
 ## App 内只做这些操作
 
-1. 设置页 → 连点版本号 **10 次** → 「测试选项」→ 打开**开发者中心**并启用。
-2. 「高级」→ 选择发布仓库 → 选 `{repo}`（只需一次）。
-3. 「工具」→ 检查更新 → 安装 **1.0.0** → 更新到 **1.1.0** → 回滚到 **1.0.0**（记录/事务应保留）。
-4. 「发布」→ 拖入 `packages/existing-plugin-update.zip` → 应识别为**更新 1.0.0→1.1.0** → 本地测试 → 填更新说明 → 预览 → 发布 → **发布完成后应自动回到「拖入插件 ZIP」页**，底部保留「已发布 …」提示。
-5. 拖入 `packages/brand-new-plugin.zip` → 应识别为**新增** → 本地测试 → 预览 → 正式发布 → 回到插件页刷新，**新插件应出现且可安装**；再发一版更新并做插件回滚。
-6. 事务进行中退出 App 再启动 → 「管理」→ 找到未完成事务 → 继续 → 完成；再做一次发布回滚；最后对一条已完成记录点「删除」，确认列表更新、线上资产不变。
-7. 依次拖入 `packages/malicious.zip`、`packages/corrupt.zip`、`packages/zip-bomb.zip` → **全部被拒绝**，且没有任何文件被写出。
-8. 插件页刷新：普通用户视角应能看到已有插件的更新与新插件。
+1. 首页插件入口 → 安装 Demo Lab Notes，关闭插件页。
+2. 设置 → 连点版本号 **10 次** →「测试选项」→ 开发者中心并启用。
+3. 「工具」→ 选择发布仓库 `{repo}` → 检查更新并安装 1.1.0 →「管理」→ 刷新。
+4. 「管理」→ Demo Lab Notes →「下架」→ 确认；应显示“已下架”。
+5. 关闭开发者中心，首页插件入口刷新：已安装插件显示“已下架”，仍可卸载；卸载后刷新，不再显示该插件。
+6. 返回开发者中心 →「管理」→「重新上架」→ 确认；首页插件入口刷新后可再次安装。
+7. 「管理」中的事务记录可用于恢复中断的操作或回滚已完成操作。
+
+## 测试中断恢复
+
+保持隔离服务运行，退出 App（⌘Q），在同一终端执行：
+
+```bash
+ORDINA_DEV_LAB_FAIL_AFTER=1 bash "{out}/launch.sh"
+```
+
+在「管理」执行一次下架或重新上架，预期出现失败提示及未完成事务。退出 App，再不带变量运行 `bash "{out}/launch.sh"`，在「管理」中选择“继续”或“回滚”；完成后插件状态应与所选操作一致。
+
+普通下架不撤回旧客户端的内置插件、离线缓存或历史下载链接。
 
 ## 清理
 
 ```bash
-pkill -f app_acceptance_server.py
+defaults delete {preference_domain}
 # 确认不再需要验收数据后，可删除 dist/app-acceptance
 ```
 
@@ -308,6 +343,7 @@ pkill -f app_acceptance_server.py
         'existingPlugin': EXISTING_ID, 'newPlugin': NEW_ID,
         'toolVersions': list(TOOL_VERSIONS), 'productionResourcesTouched': False,
         'isolatedHome': str(home),
+        'isolatedApp': str(isolated_app), 'preferencesDomain': preference_domain,
         # A Release build compiles the lab switches out; only Debug keeps the
         # isolated Registry / public key / backend branches reachable.
         'requiredBuildMode': 'Debug', 'launchApp': str(args.app),
@@ -322,7 +358,7 @@ pkill -f app_acceptance_server.py
     print(f'  工具：{", ".join(TOOL_VERSIONS)}（lab 构建，公钥 {public_key[:16]}…）')
     print(f'  已有插件：{EXISTING_ID} 1.0.0（真实六阶段事务发布）')
     print(f'  测试 ZIP：{", ".join(summary["packages"])}')
-    print('  下一步：bash dist/app-acceptance/start-registry.sh & 然后 bash dist/app-acceptance/launch.sh')
+    print(f'  验收步骤：{out / "README.md"}')
 
 
 if __name__ == '__main__':

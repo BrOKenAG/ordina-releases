@@ -1,13 +1,22 @@
 import Foundation
 
 enum IntegrationInstaller {
+    static var defaultHome: URL {
+        #if DEBUG || ORDINA_LAB
+        if ProcessInfo.processInfo.environment["ORDINA_DEV_LAB"] == "1",
+           let home = ProcessInfo.processInfo.environment["HOME"], home.hasPrefix("/") {
+            return URL(fileURLWithPath: home, isDirectory: true)
+        }
+        #endif
+        return FileManager.default.homeDirectoryForCurrentUser
+    }
     enum Status: Equatable {
         case current
         case missing
         case outdated
     }
 
-    static func inspect(home: URL = FileManager.default.homeDirectoryForCurrentUser, source: URL? = Bundle.main.url(forResource: "Project Setup", withExtension: "py")) throws -> Status {
+    static func inspect(home: URL = defaultHome, source: URL? = Bundle.main.url(forResource: "Project Setup", withExtension: "py")) throws -> Status {
         guard let source else { throw ResolveFailure(message: "缺少 Project Setup，请重新安装 ordina。") }
         let data = try Data(contentsOf: source)
         let target = home.appendingPathComponent("Library/Application Support/Blackmagic Design/DaVinci Resolve/Fusion/Scripts/Utility/Project Setup.py")
@@ -16,7 +25,7 @@ enum IntegrationInstaller {
         return installed == data || isNewer(installed, than: data) ? .current : .outdated
     }
 
-    static func install(home: URL = FileManager.default.homeDirectoryForCurrentUser, source: URL? = Bundle.main.url(forResource: "Project Setup", withExtension: "py")) throws {
+    static func install(home: URL = defaultHome, source: URL? = Bundle.main.url(forResource: "Project Setup", withExtension: "py")) throws {
         guard let source else { throw ResolveFailure(message: "缺少 Project Setup，请重新安装 ordina。") }
         let directory = home.appendingPathComponent("Library/Application Support/Blackmagic Design/DaVinci Resolve/Fusion/Scripts/Utility")
         let target = directory.appendingPathComponent("Project Setup.py")

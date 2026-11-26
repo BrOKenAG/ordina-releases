@@ -3,6 +3,15 @@ import Foundation
 // User-supplied Resolve scripts. Plugin installation lives in PluginInstaller;
 // this type only handles the local "import a .py" flow.
 enum OptionalPluginInstaller {
+    static var defaultHome: URL {
+        #if DEBUG || ORDINA_LAB
+        if ProcessInfo.processInfo.environment["ORDINA_DEV_LAB"] == "1",
+           let home = ProcessInfo.processInfo.environment["HOME"], home.hasPrefix("/") {
+            return URL(fileURLWithPath: home, isDirectory: true)
+        }
+        #endif
+        return FileManager.default.homeDirectoryForCurrentUser
+    }
     enum Failure: LocalizedError, Sendable {
         case linkedPath
 
@@ -51,11 +60,11 @@ extension OptionalPluginInstaller {
         var id: URL { source }
     }
 
-    static func scriptDirectory(home: URL = FileManager.default.homeDirectoryForCurrentUser) throws -> URL {
+    static func scriptDirectory(home: URL = defaultHome) throws -> URL {
         try checkedPath(home: home, relative: utilityPath)
     }
 
-    static func localScripts(home: URL = FileManager.default.homeDirectoryForCurrentUser) throws -> [LocalScript] {
+    static func localScripts(home: URL = defaultHome) throws -> [LocalScript] {
         let directory = try scriptDirectory(home: home)
         let files = FileManager.default
         guard files.fileExists(atPath: directory.path) else { return [] }
@@ -69,7 +78,7 @@ extension OptionalPluginInstaller {
             .map { LocalScript(url: $0, summary: summary(at: $0)) }
     }
 
-    static func prepareImport(_ source: URL, home: URL = FileManager.default.homeDirectoryForCurrentUser) throws -> Import {
+    static func prepareImport(_ source: URL, home: URL = defaultHome) throws -> Import {
         let accessed = source.startAccessingSecurityScopedResource()
         defer { if accessed { source.stopAccessingSecurityScopedResource() } }
         guard isRegularScript(source) else { throw ResolveFailure(message: "请选择一个 Python 脚本（.py）。") }
@@ -83,7 +92,7 @@ extension OptionalPluginInstaller {
                       sourceDigest: PluginProtocol.digest(data))
     }
 
-    static func install(_ pending: Import, home: URL = FileManager.default.homeDirectoryForCurrentUser) throws {
+    static func install(_ pending: Import, home: URL = defaultHome) throws {
         lock.lock()
         defer { lock.unlock() }
         let accessed = pending.source.startAccessingSecurityScopedResource()
@@ -104,7 +113,7 @@ extension OptionalPluginInstaller {
         try data.write(to: verified.destination, options: verified.existing == nil ? .withoutOverwriting : .atomic)
     }
 
-    static func removeLocalScript(_ script: LocalScript, home: URL = FileManager.default.homeDirectoryForCurrentUser) throws {
+    static func removeLocalScript(_ script: LocalScript, home: URL = defaultHome) throws {
         lock.lock()
         defer { lock.unlock() }
         let target = try checkedPath(home: home, relative: utilityPath + "/" + script.url.lastPathComponent)

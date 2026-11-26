@@ -1,12 +1,15 @@
 {
   "format": 1,
-  "generatedAt": "2026-11-25T11:11:45Z",
+  "generatedAt": "2026-11-26T04:46:43Z",
   "passed": true,
   "checks": {
     "debug": "pass",
     "release": "pass"
   },
-  "sourceCount": 34,
+  "sourceCount": {
+    "debug": 35,
+    "release": 35
+  },
   "upcomingFeatures": [
     "DisableOutwardActorInference",
     "InferSendableFromCaptures",
@@ -16,7 +19,7 @@
     "NonisolatedNonsendingByDefault"
   ],
   "memberImportVisibilityPinnedInPbxproj": 2,
-  "sparkleProducts": "/Users/13rOKen4nGeL/Documents/Codex/2026-11-02/referenced-chatgpt-conversation-this-is-an-2/ordina-release-infrastructure/.build/Build/Products/Debug",
+  "sparkleProducts": "/Users/13rOKen4nGeL/Documents/Codex/2026-11-25/files-mentioned-by-the-user-readme/work/ordina-1.10.0/.build/Build/Products/Debug",
   "method": "swiftc -typecheck (full module, real upcoming features)",
   "note": "编译/类型检查验证；完整 xcodebuild 需在 macOS 原生终端执行",
   "details": {
