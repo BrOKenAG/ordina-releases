@@ -40,7 +40,7 @@ if __name__ == '__main__':
 # Everything the engine imports at run time. dev_lab_backend is only bundled
 # into a lab build: the production tool must not contain an isolated backend.
 MODULES = (
-    'dev_publish.py', 'dev_credentials.py', 'dev_zip.py', 'durable_release.py',
+    'dev_publish.py', 'production_authorization.py', 'dev_credentials.py', 'dev_zip.py', 'durable_release.py',
     'durable_transaction.py', 'durable_journal.py', 'plugin_protocol.py',
     'publish_plugin.py', 'release_transaction.py', 'build_feeds.py',
     'feed_signing.py', 'ed25519_verify.py', 'plugin_lifecycle.py', 'sparkle_tools.py', 'github_production_backend.py',

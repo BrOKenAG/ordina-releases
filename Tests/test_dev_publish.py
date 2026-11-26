@@ -340,6 +340,7 @@ class ContractTests(EngineTestCase):
         self.assertEqual(payloads[-1]['error']['code'], 'backend.lab')
 
 
+@patch.dict(os.environ, {'ORDINA_DEV_LAB': '0', 'ORDINA_PLUGIN_LAB': '0'})
 class ProductionAuthorizationTests(unittest.TestCase):
     def test_checks_every_plugin_repository_in_transaction(self):
         with patch.object(dp, 'production_authorize') as authorize:

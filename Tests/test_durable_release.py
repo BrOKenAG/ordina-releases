@@ -246,14 +246,18 @@ class ProductionAdapterTests(unittest.TestCase):
         asset = {'url': url, 'size': 3, 'sha256': '0' * 64,
                  'ed_signature': 'SIG'}
         documents = [(self.repo, 'appcast.xml', xml, None)]
-        self.backend._validate_appcast({}, documents, asset)
-        bad = dict(asset, ed_signature='OTHER')
-        with self.assertRaises(ValueError):
-            self.backend._validate_appcast({}, documents, bad)
-        unsigned = xml.replace(b'<!-- edSignature: SIG -->', b'')
-        with self.assertRaises(ValueError):
-            self.backend._validate_appcast(
-                {}, [(self.repo, 'appcast.xml', unsigned, None)], asset)
+        with patch.object(self.backend, '_verify_appcast_signature'):
+            self.backend._validate_appcast({}, documents, asset)
+            bad = dict(asset, ed_signature='OTHER')
+            with self.assertRaises(ValueError):
+                self.backend._validate_appcast({}, documents, bad)
+            unsigned = xml.replace(b'<!-- edSignature: SIG -->', b'')
+            with self.assertRaises(ValueError):
+                self.backend._validate_appcast(
+                    {}, [(self.repo, 'appcast.xml', unsigned, None)], asset)
+        with patch.object(self.backend, '_verify_appcast_signature', side_effect=ValueError('bad signature')):
+            with self.assertRaises(ValueError):
+                self.backend._validate_appcast({}, documents, asset)
 
     def test_appcast_transition_rejects_removing_history(self):
         def feed(versions):

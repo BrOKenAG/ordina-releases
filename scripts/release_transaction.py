@@ -294,6 +294,7 @@ class LocalGateway(Gateway):
     """Real GitHub/git implementation used by the publish entry points."""
 
     def preflight(self, plan):
+        self._authorize_release(plan.repository)
         def git(*args):
             return subprocess.run(['git', *args], cwd=ROOT, capture_output=True,
                                   text=True, check=True).stdout.strip()
@@ -320,10 +321,20 @@ class LocalGateway(Gateway):
             return False
         raise ValueError('无法确认 Release 是否存在，请检查网络与授权后重试。')
 
-    def create_release(self, repository, tag, asset_path, title, notes, latest=False):
-        if repository.startswith('BrOKenAG/ordina-plugin-'):
+    @staticmethod
+    def _authorize_release(repository):
+        import re
+        if repository == 'BrOKenAG/ordina-releases':
+            from production_authorization import authorize_main_write
+            authorize_main_write()
+        elif re.fullmatch(r'BrOKenAG/ordina-plugin-[a-z][a-z0-9-]{0,31}', repository or ''):
             from dev_publish import authorize_direct_plugin_write
             authorize_direct_plugin_write({'BrOKenAG/ordina-releases', repository})
+        else:
+            raise ValueError('生产发布仓库不受信任。')
+
+    def create_release(self, repository, tag, asset_path, title, notes, latest=False):
+        self._authorize_release(repository)
         command = ['gh', 'release', 'create', tag, str(asset_path),
                    '--repo', repository, '--title', title, '--notes', notes]
         command.append('--latest' if latest else '--latest=false')
@@ -352,41 +363,11 @@ class LocalGateway(Gateway):
                 self._put_remote(target.repository, target.remote_path, target.content)
 
     def _put_remote(self, repository, remote_path, content):
-        existing = subprocess.run(
-            ['gh', 'api', f'repos/{repository}/contents/{remote_path}'],
-            cwd=ROOT, capture_output=True, text=True)
-        body = {
-            'message': f'Update {remote_path}',
-            'content': base64.b64encode(content).decode('ascii'),
-        }
-        if existing.returncode == 0:
-            current = json.loads(existing.stdout)
-            # A successful earlier attempt is reused; never overwrite a newer
-            # remote feed blindly after an interrupted multi-repository push.
-            current_bytes = base64.b64decode(current.get('content', ''), validate=False)
-            if current_bytes == content:
-                return
-            from feed_signing import verify_envelope
-            validate_feed_transition(current_bytes, content, verify_envelope)
-            body['sha'] = current['sha']
-        elif 'HTTP 404' not in existing.stderr:
-            raise ValueError(f'{repository}/{remote_path} 读取失败，停止写入。')
-        result = subprocess.run(
-            ['gh', 'api', '-X', 'PUT', f'repos/{repository}/contents/{remote_path}',
-             '--input', '-'], cwd=ROOT, input=json.dumps(body),
-            capture_output=True, text=True)
-        if result.returncode != 0:
-            raise ValueError(f'{repository}/{remote_path} 写入失败：{result.stderr.strip()}')
+        raise ValueError('直接写入已禁用，请使用持久化发布事务。')
 
     def push(self, plan):
-        if not plan.commit_paths:
-            return
-        subprocess.run(['git', 'add', '--', *plan.commit_paths], cwd=ROOT, check=True)
-        if subprocess.run(['git', 'diff', '--cached', '--quiet'], cwd=ROOT).returncode == 0:
-            print('清单内容无变化，跳过提交')
-            return
-        subprocess.run(['git', 'commit', '-m', plan.commit_message], cwd=ROOT, check=True)
-        subprocess.run(['git', 'push', 'origin', 'main'], cwd=ROOT, check=True)
+        if plan.commit_paths:
+            raise ValueError('直接推送已禁用，请使用持久化发布事务。')
 
     def verify_prerequisites(self, feeds, timeout):
         import tempfile

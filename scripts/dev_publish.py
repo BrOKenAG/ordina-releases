@@ -45,7 +45,7 @@ import publish_plugin
 from release_transaction import LocalGateway, ReleaseError
 
 TOOL = 'ordina-publisher'
-TOOL_VERSION = '1.2.0'
+TOOL_VERSION = '1.3.0'
 PROTOCOL = 1
 MIN_CLIENT = '1.10.0'
 MAX_NOTES = 2000
@@ -391,6 +391,8 @@ def credential(options, repository, scope='plugin.publish'):
 
 def production_authorize(options, repository, allow_create=False):
     """Recheck signed delegation, GitHub write permission and pinned signing key."""
+    if lab_enabled() or env('ORDINA_PLUGIN_LAB') == '1':
+        raise Failure('backend.lab', '隔离授权不能用于生产写入。')
     import re
     if not re.fullmatch(r'BrOKenAG/ordina-plugin-[a-z][a-z0-9-]{0,31}', repository or ''):
         raise Failure('auth.repository', '发布目标不在官方仓库范围。')

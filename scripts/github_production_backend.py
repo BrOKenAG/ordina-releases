@@ -23,9 +23,26 @@ from release_transaction import validate_feed_transition
 ROOT = Path(__file__).resolve().parents[1]
 SPARKLE = '{http://www.andymatuschak.org/xml-namespaces/sparkle}'
 FEED_PATHS = frozenset({'appcast.xml', 'registry.json', 'plugins/manifest.json',
-                        'manifest.json', 'manifest-v2.json'})
+                        'manifest.json', 'manifest-v2.json', 'dev-tool/manifest.json'})
 PAGES_ATTEMPTS = 4
 PAGES_DELAY = 5
+
+
+def validate_tool_transition(old, new):
+    if any(not isinstance(doc, dict) or doc.get('format') != 1 or
+           doc.get('tool') != 'ordina-publisher' or doc.get('channel') != 'stable' or
+           not isinstance(doc.get('versions'), list) for doc in (old, new)):
+        raise ValueError('发布工具清单格式无效。')
+    def entries(doc):
+        result = {}
+        for item in doc['versions']:
+            if not isinstance(item, dict) or not isinstance(item.get('version'), str) or item['version'] in result:
+                raise ValueError('发布工具版本无效或重复。')
+            result[item['version']] = item
+        return result
+    before, after = entries(old), entries(new)
+    if any(version not in after or after[version] != item for version, item in before.items()):
+        raise ValueError('发布工具历史版本不可覆盖或删除。')
 
 
 class ProductionBackend(GitHubLabMultiBackend):
@@ -71,6 +88,13 @@ class ProductionBackend(GitHubLabMultiBackend):
         self.allowed = frozenset(allowed)
         if not self.valid_allowlist(self.allowed) or lock_repo != 'BrOKenAG/ordina-releases':
             raise ValueError('untrusted repository configuration')
+        main_paths = {'registry.json', 'plugins/manifest.json', 'plugins/registry.source.json',
+                      'dev-tool/manifest.json', 'appcast.xml'}
+        plugin_paths = {'manifest.json', 'manifest-v2.json'}
+        for repo, names in paths.items():
+            allowed_paths = main_paths if repo == lock_repo else plugin_paths
+            if not names or not set(names) <= allowed_paths:
+                raise ValueError('生产发布文件不在允许范围内。')
         super().__init__(lock_repo, asset_repo, asset_tag, asset_name, paths)
 
     def _check(self, repo):
@@ -78,9 +102,20 @@ class ProductionBackend(GitHubLabMultiBackend):
             raise ValueError('repository is not explicitly authorized')
 
     def _authorize_plugin_write(self):
-        if self.asset_repo.startswith('BrOKenAG/ordina-plugin-'):
+        repositories = set(self.paths) | {self.asset_repo}
+        plugins = {repo for repo in repositories if repo.startswith('BrOKenAG/ordina-plugin-')}
+        if plugins:
             from dev_publish import authorize_direct_plugin_write
-            authorize_direct_plugin_write(set(self.paths) | {self.asset_repo})
+            authorize_direct_plugin_write(plugins | {'BrOKenAG/ordina-releases'})
+        if self.asset_repo == 'BrOKenAG/ordina-releases':
+            from production_authorization import authorize_main_write
+            authorize_main_write()
+        elif self.asset_repo not in plugins:
+            raise ValueError('生产资产仓库不受信任。')
+
+    def _advance(self, repo, ref, sha):
+        self._authorize_plugin_write()
+        return super()._advance(repo, ref, sha)
 
     def acquire(self, token):
         self._authorize_plugin_write()
@@ -138,7 +173,9 @@ class ProductionBackend(GitHubLabMultiBackend):
                 if path != 'appcast.xml':
                     from feed_signing import verify_envelope
                     document = verify_envelope(content)
-                    if document.get('format') not in (1, 2) or not isinstance(document.get('plugins'), dict):
+                    if path == 'dev-tool/manifest.json':
+                        validate_tool_transition(document, document)
+                    elif not isinstance(document, dict) or document.get('format') not in (1, 2) or not isinstance(document.get('plugins'), dict):
                         raise ValueError('invalid signed feed')
                 documents.append((repo, path, content, document))
         if not documents:
@@ -175,13 +212,28 @@ class ProductionBackend(GitHubLabMultiBackend):
                         raise ValueError('registry changes require separate review')
                 elif path == 'appcast.xml':
                     self._validate_appcast_transition(old, new)
+                elif path == 'dev-tool/manifest.json':
+                    validate_tool_transition(verify_envelope(old), verify_envelope(new))
                 else:
                     validate_feed_transition(old, new, verify_envelope)
+
+    @staticmethod
+    def _verify_appcast_signature(content):
+        from feed_signing import sign_tool
+        from sparkle_tools import KEYCHAIN_ACCOUNT
+        with tempfile.TemporaryDirectory(prefix='ordina-feed-verify-') as tmp:
+            feed = Path(tmp) / 'appcast.xml'
+            feed.write_bytes(content)
+            checked = subprocess.run([str(sign_tool()), '--account', KEYCHAIN_ACCOUNT,
+                                      '--verify', str(feed)], capture_output=True, text=True)
+            if checked.returncode:
+                raise ValueError('appcast 签名无效。')
 
     def _validate_appcast(self, plan, documents, asset):
         for _, path, content, _ in documents:
             if path != 'appcast.xml':
                 continue
+            self._verify_appcast_signature(content)
             enclosure = None
             for item in ET.fromstring(content).findall('./channel/item'):
                 node = item.find('enclosure')
@@ -228,12 +280,15 @@ class ProductionBackend(GitHubLabMultiBackend):
         documents = self._feed_documents(plan)
         references = []
         for _, _, _, document in documents:
-            if document and document['format'] == 1:
+            if document and 'plugins' in document and document['format'] == 1:
                 references.extend(document['plugins'].values())
-        if not references:
+            elif document and document.get('tool') == 'ordina-publisher':
+                references.extend(document['versions'])
+        appcast_only = bool(documents) and all(path == 'appcast.xml' for _, path, _, _ in documents)
+        if not references and not appcast_only:
             raise ValueError('missing signed-feed asset references')
-        if not any(item.get('url') == primary and item.get('sha256') == asset['sha256']
-                   for item in references):
+        if not appcast_only and not any(item.get('url') == primary and item.get('sha256') == asset['sha256']
+                                        for item in references):
             raise ValueError('new release asset is not referenced by a signed feed')
         self.validate_transitions(plan)
         self._validate_appcast(plan, documents, asset)
