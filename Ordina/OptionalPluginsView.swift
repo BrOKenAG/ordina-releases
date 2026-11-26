@@ -52,7 +52,7 @@ private final class PluginCenterModel: ObservableObject {
     func load(silent: Bool = false) async {
         if !silent { loading = true }
         let result = await Task.detached(priority: .utility) {
-            PluginOperations.load()
+            PluginOperations.load(forceRefresh: true)
         }.value
         items = result.items
         loadError = result.registryError

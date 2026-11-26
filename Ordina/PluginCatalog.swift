@@ -30,12 +30,13 @@ enum PluginCatalog {
         let registryError: String?
     }
 
-    static func load(environment: PluginEnvironment = .current) -> LoadResult {
+    static func load(forceRefresh: Bool = false,
+                     environment: PluginEnvironment = .current) -> LoadResult {
         var entries: [String: PluginRegistryEntry] = [:]
         var withdrawn: Set<String> = []
         var registryError: String?
         do {
-            let snapshot = try PluginUpdates.registry(environment: environment)
+            let snapshot = try PluginUpdates.registry(forceRefresh: forceRefresh, environment: environment)
             entries = snapshot.plugins
             withdrawn = snapshot.withdrawn
         } catch {
@@ -111,8 +112,9 @@ enum PluginCatalog {
 // One place that performs discovery -> verified download -> install -> state
 // refresh. Both the SwiftUI view and the standalone harness call this.
 enum PluginOperations {
-    static func load(environment: PluginEnvironment = .current) -> PluginCatalog.LoadResult {
-        PluginCatalog.load(environment: environment)
+    static func load(forceRefresh: Bool = false,
+                     environment: PluginEnvironment = .current) -> PluginCatalog.LoadResult {
+        PluginCatalog.load(forceRefresh: forceRefresh, environment: environment)
     }
 
     static func install(_ item: PluginCatalog.Item,
