@@ -340,5 +340,42 @@ class ContractTests(EngineTestCase):
         self.assertEqual(payloads[-1]['error']['code'], 'backend.lab')
 
 
+class ProductionAuthorizationTests(unittest.TestCase):
+    def test_publish_denied_before_preparing_or_writing(self):
+        from types import SimpleNamespace
+        options = SimpleNamespace(execute=True, zip='plugin.zip', notes='', plugin_id=None,
+                                  backend='production', create_repository=False)
+        with patch.object(dp, 'environment_repository', return_value=Path('/tmp/repo')), \
+             patch.object(dp, 'inspect_package', return_value={'repository': {'slug': 'BrOKenAG/ordina-plugin-demo'}}), \
+             patch.object(dp, 'production_authorize', side_effect=dp.Failure('auth.github', 'denied')), \
+             patch.object(dp, 'prepare_zip') as prepare, patch.object(dp.durable_release, 'execute') as execute:
+            with self.assertRaises(dp.Failure):
+                dp.command_publish(options)
+            prepare.assert_not_called()
+            execute.assert_not_called()
+
+    def test_rejects_missing_repository_write_permission_before_signing(self):
+        from types import SimpleNamespace
+        options = SimpleNamespace(credentials=None)
+        with patch.object(dp, 'credential'), patch.object(dp.subprocess, 'run') as run, \
+             patch('feed_signing.sign_document') as sign:
+            run.return_value = SimpleNamespace(returncode=0, stdout='{"permissions":{"push":false}}')
+            with self.assertRaises(dp.Failure) as caught:
+                dp.production_authorize(options, 'BrOKenAG/ordina-plugin-demo')
+            self.assertEqual(caught.exception.code, 'auth.github')
+            sign.assert_not_called()
+
+    def test_rejects_untrusted_signer_after_repository_checks(self):
+        from types import SimpleNamespace
+        options = SimpleNamespace(credentials=None)
+        with patch.object(dp, 'credential'), patch.object(dp.subprocess, 'run') as run, \
+             patch('feed_signing.sign_document', side_effect=ValueError('bad signer')):
+            run.return_value = SimpleNamespace(returncode=0, stdout='{"permissions":{"push":true}}')
+            with self.assertRaises(dp.Failure) as caught:
+                dp.production_authorize(options, 'BrOKenAG/ordina-plugin-demo')
+            self.assertEqual(caught.exception.code, 'auth.signing')
+            self.assertEqual(run.call_count, 2)
+
+
 if __name__ == '__main__':
     unittest.main()

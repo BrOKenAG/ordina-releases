@@ -28,6 +28,7 @@ import base64
 import hashlib
 import json
 import os
+import secrets
 import subprocess
 import sys
 import tempfile
@@ -352,6 +353,44 @@ def credential(options, repository, scope='plugin.publish'):
     except dev_credentials.CredentialError as error:
         raise Failure(error.code, str(error))
     return document, source
+
+
+def production_authorize(options, repository, allow_create=False):
+    """Recheck signed delegation, GitHub write permission and pinned signing key."""
+    import re
+    if not re.fullmatch(r'BrOKenAG/ordina-plugin-[a-z][a-z0-9-]{0,31}', repository or ''):
+        raise Failure('auth.repository', '发布目标不在官方仓库范围。')
+    credential(options, repository)
+    for slug in ('BrOKenAG/ordina-releases', repository):
+        result = None
+        try:
+            result = subprocess.run(['gh', 'api', f'repos/{slug}'], capture_output=True,
+                                    text=True, timeout=15)
+            info = json.loads(result.stdout) if result.returncode == 0 else {}
+            permissions = info.get('permissions') if isinstance(info, dict) else None
+            permitted = isinstance(permissions, dict) and permissions.get('push') is True
+        except (OSError, ValueError, subprocess.SubprocessError):
+            permitted = False
+        if not permitted:
+            # Repository creation requires a separate explicit scope and the
+            # signed-in official owner; all other failures remain fail-closed.
+            if allow_create and slug == repository and result is not None and result.returncode != 0 and \
+                    ('HTTP 404' in result.stderr or 'Not Found' in result.stderr):
+                credential(options, repository, scope='repository.create')
+                try:
+                    user = subprocess.run(['gh', 'api', 'user', '--jq', '.login'],
+                                          capture_output=True, text=True, timeout=15)
+                    if user.returncode == 0 and user.stdout.strip().lower() == 'brokenag':
+                        continue
+                except (OSError, subprocess.SubprocessError):
+                    pass
+            raise Failure('auth.github', f'无法确认 {slug} 的 GitHub 写入权限。')
+    try:
+        from feed_signing import sign_document
+        sign_document({'purpose': 'ordina-publish-authorization',
+                       'nonce': secrets.token_hex(32)})
+    except (ValueError, OSError, subprocess.SubprocessError, ImportError) as error:
+        raise Failure('auth.signing', '无法验证可信发布签名能力。') from error
 
 
 def repository_state(slug, kind):
@@ -724,6 +763,9 @@ def command_publish(options):
     if len(notes) > MAX_NOTES:
         raise Failure('publish.notes', f'更新说明超过 {MAX_NOTES} 字。')
     inspected = inspect_package(zip_path, options.plugin_id, root)
+    slug = inspected['repository']['slug']
+    if options.backend == 'production':
+        production_authorize(options, slug, allow_create=options.create_repository)
     prepared = restrict_feeds(prepare_zip(zip_path, notes, options.plugin_id, root),
                               options.backend)
     slug = prepared.target['repository']
@@ -744,6 +786,8 @@ def command_publish(options):
         credential(options, slug, scope='repository.create')
         log(f'创建仓库 {slug}')
         create_repository(slug, prepared.name, options.backend)
+        if options.backend == 'production':
+            production_authorize(options, slug)
 
     journal_dir = journal_directory(root, options.journal_dir)
     journal_dir.mkdir(parents=True, exist_ok=True)
@@ -762,6 +806,8 @@ def command_publish(options):
 
         log(f'{prepared.plan.label} → {slug}')
         try:
+            if options.backend == 'production':
+                production_authorize(options, slug)
             result = durable_release.execute(prepared.plan, gateway, backend,
                                             staged, tmp, options.timeout,
                                             on_stage=on_stage)
@@ -837,6 +883,9 @@ def command_resume(options):
     root = environment_repository(required=True)
     credential(options, summary.get('repository') or
                f'BrOKenAG/ordina-plugin-{summary.get("plugin")}')
+    if options.backend == 'production':
+        production_authorize(options, summary.get('repository') or
+                             f'BrOKenAG/ordina-plugin-{summary.get("plugin")}')
     backend, durable, _ = backend_for_journal(options, path)
     event('stage', stage='feeds', state='running', index=4, total=len(STAGES))
     try:
@@ -861,6 +910,9 @@ def command_rollback(options):
     root = environment_repository(required=True)
     credential(options, summary.get('repository') or
                f'BrOKenAG/ordina-plugin-{summary.get("plugin")}')
+    if options.backend == 'production':
+        production_authorize(options, summary.get('repository') or
+                             f'BrOKenAG/ordina-plugin-{summary.get("plugin")}')
     backend, durable, _ = backend_for_journal(options, path)
     try:
         from durable_transaction import rollback
