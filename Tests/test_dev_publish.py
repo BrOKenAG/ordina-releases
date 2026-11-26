@@ -341,6 +341,26 @@ class ContractTests(EngineTestCase):
 
 
 class ProductionAuthorizationTests(unittest.TestCase):
+    def test_checks_every_plugin_repository_in_transaction(self):
+        with patch.object(dp, 'production_authorize') as authorize:
+            dp.authorize_repositories(None, {'BrOKenAG/ordina-releases',
+                                             'BrOKenAG/ordina-plugin-a',
+                                             'BrOKenAG/ordina-plugin-b'})
+        self.assertEqual({call.args[1] for call in authorize.call_args_list},
+                         {'BrOKenAG/ordina-plugin-a', 'BrOKenAG/ordina-plugin-b'})
+
+    def test_rechecks_authorization_before_transaction_writes(self):
+        from unittest.mock import Mock
+        backend = Mock()
+        guard = Mock(side_effect=dp.Failure('auth.github', 'revoked'))
+        wrapped = dp.AuthorizedBackend(backend, guard)
+        with self.assertRaises(dp.Failure):
+            wrapped.acquire('token')
+        with self.assertRaises(dp.Failure):
+            wrapped.write('repo', 'head', b'feed', 'token')
+        backend.acquire.assert_not_called()
+        backend.write.assert_not_called()
+
     def test_publish_denied_before_preparing_or_writing(self):
         from types import SimpleNamespace
         options = SimpleNamespace(execute=True, zip='plugin.zip', notes='', plugin_id=None,

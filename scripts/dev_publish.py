@@ -332,7 +332,38 @@ def lab_root():
     return Path(value).expanduser().resolve()
 
 
-def build_backend(kind, staged, plan, root):
+class AuthorizedBackend:
+    """Repeat the authorization gate before each remote mutation."""
+    def __init__(self, backend, authorize):
+        self.backend = backend
+        self.authorize = authorize
+
+    def __getattr__(self, name):
+        return getattr(self.backend, name)
+
+    def acquire(self, token):
+        self.authorize()
+        return self.backend.acquire(token)
+
+    def release(self, token):
+        self.authorize()
+        return self.backend.release(token)
+
+    def write(self, repo, expected, data, token):
+        self.authorize()
+        return self.backend.write(repo, expected, data, token)
+
+
+class AuthorizedGateway(LocalGateway):
+    def __init__(self, authorize):
+        self.authorize = authorize
+
+    def create_release(self, repository, tag, asset_path, title, notes, latest=False):
+        self.authorize()
+        return super().create_release(repository, tag, asset_path, title, notes, latest)
+
+
+def build_backend(kind, staged, plan, root, authorize=None):
     if kind == 'lab':
         if not lab_enabled():
             raise Failure('backend.lab', '隔离后端只允许在隔离环境使用。')
@@ -342,7 +373,9 @@ def build_backend(kind, staged, plan, root):
             raise Failure('backend.lab', '当前发布工具未包含隔离后端。')
         shared = lab_root()
         return dev_lab_backend.LabBackend(shared), dev_lab_backend.LabGateway(shared)
-    return durable_release.production_backend(staged, plan), LocalGateway()
+    if authorize is None:
+        raise Failure('auth.missing', '生产事务缺少权限验证。')
+    return AuthorizedBackend(durable_release.production_backend(staged, plan), authorize), AuthorizedGateway(authorize)
 
 
 def credential(options, repository, scope='plugin.publish'):
@@ -391,6 +424,14 @@ def production_authorize(options, repository, allow_create=False):
                        'nonce': secrets.token_hex(32)})
     except (ValueError, OSError, subprocess.SubprocessError, ImportError) as error:
         raise Failure('auth.signing', '无法验证可信发布签名能力。') from error
+
+
+def authorize_repositories(options, repositories):
+    plugins = sorted(set(repositories) - {'BrOKenAG/ordina-releases'})
+    if not plugins:
+        raise Failure('auth.repository', '生产事务缺少插件发布仓库。')
+    for repository in plugins:
+        production_authorize(options, repository)
 
 
 def repository_state(slug, kind):
@@ -797,8 +838,10 @@ def command_publish(options):
             prepared.plan, f'plugin-{prepared.name}-v{prepared.version}',
             journal_dir=journal_dir)
         meta = write_meta(staged.journal, prepared, notes)
+        repositories = set(staged.paths) | {slug}
+        guard = (lambda: authorize_repositories(options, repositories)) if options.backend == 'production' else None
         backend, gateway = build_backend(options.backend, staged,
-                                         prepared.plan, root)
+                                         prepared.plan, root, guard)
 
         def on_stage(name, state_name):
             event('stage', stage=name, state=state_name,
@@ -887,6 +930,10 @@ def command_resume(options):
         production_authorize(options, summary.get('repository') or
                              f'BrOKenAG/ordina-plugin-{summary.get("plugin")}')
     backend, durable, _ = backend_for_journal(options, path)
+    if options.backend == 'production':
+        repository = summary.get('repository') or f'BrOKenAG/ordina-plugin-{summary.get("plugin")}'
+        repositories = set(durable['feeds']) | {repository}
+        backend = AuthorizedBackend(backend, lambda: authorize_repositories(options, repositories))
     event('stage', stage='feeds', state='running', index=4, total=len(STAGES))
     try:
         durable_release.resume_journal(path, backend)
@@ -914,6 +961,10 @@ def command_rollback(options):
         production_authorize(options, summary.get('repository') or
                              f'BrOKenAG/ordina-plugin-{summary.get("plugin")}')
     backend, durable, _ = backend_for_journal(options, path)
+    if options.backend == 'production':
+        repository = summary.get('repository') or f'BrOKenAG/ordina-plugin-{summary.get("plugin")}'
+        repositories = set(durable['feeds']) | {repository}
+        backend = AuthorizedBackend(backend, lambda: authorize_repositories(options, repositories))
     try:
         from durable_transaction import rollback
         rollback(path, backend)
