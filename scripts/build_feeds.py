@@ -81,7 +81,9 @@ def registry_descriptor(name, meta):
         'version': value['version'],
         'minClientVersion': value['minClientVersion'],
         'protocol': value['protocol'],
-        'capabilities': value['capabilities'],
+        # Old clients reject the whole registry on an unknown capability.
+        # The signed per-plugin descriptor retains the full capability set.
+        'capabilities': [cap for cap in value['capabilities'] if cap != 'macos.application'] or ['resolve.support'],
     }
 
 

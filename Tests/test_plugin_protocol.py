@@ -231,3 +231,17 @@ class FeedTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+class NativeCapabilityTests(unittest.TestCase):
+    def test_native_capability_requires_new_client(self):
+        value = pp.descriptor('demo', meta(capabilities=['resolve.utilityScript', 'macos.application'], minClientVersion='1.10.0'))
+        pp.validate_descriptor('demo', value)
+        value['minClientVersion'] = '1.9.6'
+        with self.assertRaises(ValueError): pp.validate_descriptor('demo', value)
+
+    def test_native_inventory_requires_single_app_root(self):
+        files = bundle_files() + [file_entry('Example.app/Contents/Info.plist', b'plist', role='application', install=None),
+                                  file_entry('Example.app/Contents/MacOS/Example', b'binary', role='application', install=None, executable=True)]
+        pp.validate_files('demo', 'bundle', files)
+        files.append(file_entry('Other.app/Contents/Info.plist', b'other', role='application', install=None))
+        with self.assertRaises(ValueError): pp.validate_files('demo', 'bundle', files)

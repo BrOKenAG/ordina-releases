@@ -58,6 +58,9 @@ with tempfile.TemporaryDirectory(prefix='ordina-verification-') as temporary:
         subprocess.run(command, cwd=root, env=environment, check=True)
         subprocess.run([str(executable)], cwd=temporary, env=environment, check=True)
 
+subprocess.run([sys.executable, '-B', str(root / 'scripts' / 'verify_native_plugin.py')],
+               cwd=root, env=environment, check=True)
+
 # Full-module Swift type-check under the real Xcode compile settings. It needs
 # Sparkle.framework from a prior build/resolve; skip (with a clear note) when
 # the workspace has not been built yet, so this file still runs on a clean tree.

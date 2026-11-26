@@ -21,6 +21,8 @@ import base64
 import copy
 import hashlib
 import json
+import os
+import subprocess
 import re
 import sys
 import tempfile
@@ -78,6 +80,44 @@ def declared_roles(meta):
     return result
 
 
+def verify_native_bundle(directory, inventory):
+    """Verify an inventoried app in a disposable reconstruction before publishing."""
+    native = [item for item in inventory if item['role'] == 'application']
+    if not native:
+        return
+    root = native[0]['path'].split('/')[0]
+    with tempfile.TemporaryDirectory(prefix='ordina-native-check-') as temporary:
+        stage = Path(temporary)
+        for item in native:
+            source = directory / item['path']
+            if source.is_symlink() or not source.is_file():
+                raise ValueError('原生 App 含有不支持的文件或链接。')
+            data = source.read_bytes()
+            if len(data) != item['size'] or hashlib.sha256(data).hexdigest() != item['sha256']:
+                raise ValueError('原生 App 资源摘要不匹配。')
+            target = stage / item['path']
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(data)
+            target.chmod(0o700 if item.get('executable') else 0o600)
+        application = stage / root
+        def verify(command):
+            try:
+                result = subprocess.run(command, capture_output=True, text=True, timeout=60)
+            except (OSError, subprocess.SubprocessError) as error:
+                raise ValueError('无法验证原生 App 签名或公证。') from error
+            if result.returncode:
+                raise ValueError('原生 App 签名或公证无效。')
+            return result.stdout + result.stderr
+        verify(['/usr/bin/codesign', '--verify', '--deep', '--strict', str(application)])
+        if os.environ.get('ORDINA_DEV_LAB') == '1' and os.environ.get('ORDINA_DEV_BACKEND') == 'lab':
+            return
+        requirement = 'anchor apple generic and certificate leaf[field.1.2.840.113635.100.6.1.13] exists'
+        verify(['/usr/bin/codesign', '--verify', '--deep', '--strict', '-R', requirement, str(application)])
+        assessment = verify(['/usr/sbin/spctl', '--assess', '--verbose=4', '--type', 'execute', str(application)])
+        if 'source=Notarized Developer ID' not in assessment:
+            raise ValueError('原生 App 未通过公证验证。')
+
+
 def build_bundle(directory, expected_id=None):
     """Return deterministic container bytes, version and the verified inventory.
 
@@ -127,13 +167,17 @@ def build_bundle(directory, expected_id=None):
         if options.get('executable'):
             item['executable'] = True
         inventory.append(item)
-    if len(files) > 32:
+    if len(files) > 512:
         raise ValueError('插件包文件数量过多。')
     protocol.validate_files(plugin_id, 'bundle', inventory)
+    if ('macos.application' in meta.get('capabilities', [])) != any(item['role'] == 'application' for item in inventory):
+        raise ValueError('原生能力与文件清单不一致。')
+    verify_native_bundle(directory, inventory)
     document = {'format': 1, 'id': plugin_id, 'version': ver, 'files': files}
     data = json.dumps(document, ensure_ascii=False, sort_keys=True,
                       separators=(',', ':')).encode('utf-8')
-    if len(data) > 4_000_000:
+    limit = 96_000_000 if 'macos.application' in meta.get('capabilities', []) else 4_000_000
+    if len(data) > limit:
         raise ValueError('插件包体积过大。')
     return data, ver, inventory
 

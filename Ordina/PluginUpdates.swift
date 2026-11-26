@@ -59,7 +59,7 @@ enum PluginUpdates {
     static func files(for release: PluginRelease,
                       environment: PluginEnvironment = .current) throws -> [String: Data] {
         guard let url = URL(string: release.url) else { throw PluginProtocol.Failure.invalid }
-        let limit = release.descriptor.isBundle ? PluginProtocol.maximumBundle
+        let limit = release.descriptor.isBundle ? (release.descriptor.capabilities.contains(.macOSApplication) ? PluginProtocol.maximumNativeBundle : PluginProtocol.maximumBundle)
                                                 : PluginProtocol.maximumScript
         let data = try download(url, maxBytes: limit, disableProxy: environment.disableProxy)
         return try PluginProtocol.unpack(data, release: release)

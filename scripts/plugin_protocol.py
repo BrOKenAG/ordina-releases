@@ -18,12 +18,14 @@ import re
 PROTOCOL = 2
 FORMAT = 1
 CAPABILITIES = {
+    'macos.application',
     'resolve.utilityScript',
     'resolve.support',
     'chrome.nativeMessagingHost',
     'chrome.unpackedExtension',
 }
 ROLES = {
+    'application',
     'metadata',
     'utilityScript',
     'support',
@@ -67,6 +69,8 @@ def safe_relative(path, depth=4):
     if path.startswith('/') or '\\' in path or ':' in path or '\0' in path:
         return False
     parts = path.split('/')
+    if len(parts) >= 2 and parts[0].endswith('.app') and parts[1] == 'Contents':
+        depth = max(depth, 12)
     if len(parts) > depth or any(not part or part.startswith('.') for part in parts):
         return False
     return all(SEGMENT_RE.fullmatch(part) for part in parts)
@@ -136,6 +140,8 @@ def validate_descriptor(name, value):
             or len(set(capabilities)) != len(capabilities)
             or any(item not in CAPABILITIES for item in capabilities)):
         problems.append('能力集合不合法')
+    if 'macos.application' in (capabilities or []) and (not valid_version(value.get('minClientVersion')) or tuple(map(int, (value['minClientVersion'].split('.') + ['0'] * 4)[:4])) < (1, 10, 0, 0)):
+        problems.append('原生插件需要 ordina 1.10.0 或更新版本')
     if value.get('supportDirectoryName') and not valid_support_name(value['supportDirectoryName']):
         problems.append('支持目录名不合法')
     if value.get('nativeMessagingHost') and not safe_relative(value['nativeMessagingHost'], depth=2):
@@ -152,7 +158,7 @@ def validate_descriptor(name, value):
 
 
 def validate_files(name, kind, files):
-    if not isinstance(files, list) or not 1 <= len(files) <= 32:
+    if not isinstance(files, list) or not 1 <= len(files) <= 512:
         raise ValueError('文件清单数量无效')
     seen = set()
     for item in files:
@@ -167,12 +173,19 @@ def validate_files(name, kind, files):
         if not valid_sha(item.get('sha256')):
             raise ValueError('文件哈希无效：' + str(path))
         size = item.get('size')
-        if not isinstance(size, int) or not 1 <= size <= 4_000_000:
+        if not isinstance(size, int) or not 1 <= size <= (16_000_000 if item.get('role') == 'application' else 1_000_000):
             raise ValueError('文件大小无效：' + str(path))
         if 'installName' in item and not valid_install_name(item['installName']):
             raise ValueError('安装文件名无效：' + str(path))
         if 'executable' in item and not isinstance(item['executable'], bool):
             raise ValueError('可执行标记无效：' + str(path))
+    app_items = [item['path'] for item in files if item['role'] == 'application']
+    if app_items:
+        roots = {path.split('/')[0] for path in app_items}
+        if len(roots) != 1 or not next(iter(roots)).endswith('.app') or any(not path.startswith(next(iter(roots)) + '/Contents/') for path in app_items):
+            raise ValueError('原生 App 文件路径无效')
+        if any(item['path'].startswith(next(iter(roots)) + '/') and item['role'] != 'application' for item in files):
+            raise ValueError('原生 App 文件角色不一致')
     roles = [item['role'] for item in files]
     if kind == 'script':
         if len(files) != 1 or roles != ['utilityScript']:
@@ -214,7 +227,9 @@ def validate_manifest_entry(name, entry):
     if not valid_sha(entry.get('sha256')):
         raise ValueError('资产哈希无效')
     size = entry.get('size')
-    if not isinstance(size, int) or not 1 <= size <= 4_000_000:
+    if not isinstance(size, int) or not 1 <= size <= (96_000_000 if 'macos.application' in value['capabilities'] else 4_000_000):
         raise ValueError('资产大小无效')
     validate_files(name, value['kind'], entry.get('files'))
+    if ('macos.application' in value['capabilities']) != any(item['role'] == 'application' for item in entry['files']):
+        raise ValueError('原生能力与文件清单不一致')
     return True

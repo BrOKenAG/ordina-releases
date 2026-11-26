@@ -251,6 +251,28 @@ struct VerifyPluginInstaller {
         }
         try require(!manager.fileExists(atPath: failing.utilityDirectory.appendingPathComponent("demo.py").path),
                     "record failure left plugin files installed")
+        // A failed uninstall must restore files already removed and preserve its record.
+        let rollbackHome = root.appendingPathComponent("uninstall-failure-home")
+        let rollbackEnv = PluginEnvironment.lab(registryURL: URL(string: "http://127.0.0.1:1/registry.json")!,
+                                                host: "127.0.0.1", publicKey: Data(), home: rollbackHome,
+                                                clientVersion: "1.9.6")
+        try PluginInstaller.install(first, files: data, environment: rollbackEnv)
+        let blocked = rollbackHome.appendingPathComponent("Library/Application Support/Demo Notes/extension")
+        try manager.setAttributes([.posixPermissions: 0o500], ofItemAtPath: blocked.path)
+        defer { try? manager.setAttributes([.posixPermissions: 0o700], ofItemAtPath: blocked.path) }
+        try expectFailure("uninstall permission failure was accepted") {
+            try PluginInstaller.uninstall(descriptor, environment: rollbackEnv)
+        }
+        try require(try Data(contentsOf: rollbackEnv.utilityDirectory.appendingPathComponent("demo.py")) == data["demo.py"],
+                    "uninstall failure did not restore earlier files")
+        try require(PluginInstaller.state("demo", environment: rollbackEnv)?.version == "1.0.0",
+                    "uninstall failure removed the installation record")
+        try manager.setAttributes([.posixPermissions: 0o700], ofItemAtPath: blocked.path)
+        let modified = rollbackHome.appendingPathComponent("Library/Application Support/Demo Notes/host.py")
+        try Data("user changes".utf8).write(to: modified)
+        try PluginInstaller.uninstall(descriptor, environment: rollbackEnv)
+        try require(try Data(contentsOf: modified) == Data("user changes".utf8),
+                    "uninstall removed user-modified data")
         print("Plugin installer: capabilities, update, rollback, uninstall and migration passed")
     }
 }

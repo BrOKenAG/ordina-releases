@@ -24,6 +24,7 @@ by ``publish_plugin.build_bundle`` from the extracted files, so nothing in the
 ZIP can declare its own hash or install target.
 """
 import hashlib
+import json
 import os
 import stat
 import zipfile
@@ -32,10 +33,10 @@ from pathlib import Path
 
 import plugin_protocol as protocol
 
-MAX_ARCHIVE = 4_000_000        # the ZIP itself
-MAX_ENTRIES = 96               # files + directories; a bundle allows 32 files
-MAX_TOTAL = 8_000_000          # uncompressed payload
-MAX_FILE = 1_000_000           # client limit per installed file
+MAX_ARCHIVE = 32_000_000        # the ZIP itself
+MAX_ENTRIES = 1024               # files + directories; a bundle allows 32 files
+MAX_TOTAL = 64_000_000          # uncompressed payload
+MAX_FILE = 16_000_000           # client limit per installed file
 MAX_RATIO = 200                # compressed -> uncompressed amplification
 MAX_PATH = 200                 # matches PluginProtocol.validRelativePath
 IGNORED_NAMES = {'.DS_Store', '__MACOSX', '__pycache__'}
@@ -72,9 +73,12 @@ def _entry_name(info):
         _fail('package.entry', '安装包包含路径穿越：' + raw)
     if any(part in IGNORED_NAMES for part in parts):
         return None
-    if len(parts) > 4:
+    if len(parts) > 12:
         _fail('package.entry', '安装包目录层级过深：' + raw)
-    if not protocol.safe_relative('/'.join(parts)):
+    valid = protocol.safe_relative('/'.join(parts))
+    if not valid and len(parts) >= 3 and parts[1].endswith('.app') and parts[2] == 'Contents':
+        valid = protocol.safe_relative(parts[0]) and protocol.safe_relative('/'.join(parts[1:]))
+    if not valid:
         _fail('package.entry', '安装包包含协议不允许的路径：' + raw)
     return '/'.join(parts)
 
@@ -103,7 +107,7 @@ def read_archive(path):
     if not path.is_file():
         _fail('package.missing', '找不到安装包：' + str(path))
     if path.stat().st_size > MAX_ARCHIVE:
-        _fail('package.size', '安装包超过 4 MB 上限。')
+        _fail('package.size', '安装包超过 32 MB 上限。')
     try:
         archive = zipfile.ZipFile(path)
     except (zipfile.BadZipFile, OSError):
@@ -127,14 +131,14 @@ def read_archive(path):
             seen.add(folded)
             if not info.is_dir():
                 if info.file_size > MAX_FILE:
-                    _fail('package.file', f'{name} 超过单文件 1 MB 上限。')
+                    _fail('package.file', f'{name} 超过单文件 16 MB 上限。')
                 if info.compress_size == 0 and info.file_size > 0:
                     _fail('package.corrupt', '安装包条目损坏：' + name)
                 if info.compress_size and info.file_size / info.compress_size > MAX_RATIO:
                     _fail('package.bomb', '安装包压缩比异常：' + name)
                 total += info.file_size
                 if total > MAX_TOTAL:
-                    _fail('package.size', '安装包解压后超过 8 MB 上限。')
+                    _fail('package.size', '安装包解压后超过 64 MB 上限。')
                 entries[name] = info
 
     if not entries:
@@ -145,6 +149,16 @@ def read_archive(path):
         entries = {name[len(prefix):]: info for name, info in entries.items()}
     if 'plugin.json' not in entries:
         _fail('package.manifest', '安装包根目录缺少 plugin.json。')
+    if total > 8_000_000 or any(info.file_size > 1_000_000 for info in entries.values()):
+        try:
+            with zipfile.ZipFile(path) as archive:
+                raw = archive.read(entries['plugin.json'])
+            metadata = json.loads(raw)
+            native = isinstance(metadata, dict) and 'macos.application' in metadata.get('capabilities', [])
+        except (ValueError, OSError, KeyError, TypeError, zipfile.BadZipFile):
+            native = False
+        if not native:
+            _fail('package.size', '传统插件超过原有大小上限。')
     return entries
 
 
@@ -175,7 +189,7 @@ def extract(path, destination):
                             break
                         remaining -= len(chunk)
                         if remaining < 0:
-                            _fail('package.file', f'{name} 超过单文件 1 MB 上限。')
+                            _fail('package.file', f'{name} 超过单文件 16 MB 上限。')
                         stream.write(chunk)
                 stream.flush()
                 os.fsync(stream.fileno())

@@ -6,6 +6,7 @@ import CryptoKit
 // path or an arbitrary install target. Installation behaviour is limited to the
 // capabilities compiled into this client.
 enum PluginCapability: String, CaseIterable, Codable, Sendable {
+    case macOSApplication = "macos.application"
     case resolveUtilityScript = "resolve.utilityScript"
     case resolveSupport = "resolve.support"
     case chromeNativeMessagingHost = "chrome.nativeMessagingHost"
@@ -13,6 +14,7 @@ enum PluginCapability: String, CaseIterable, Codable, Sendable {
 }
 
 enum PluginFileRole: String, Codable, Sendable {
+    case application
     case metadata
     case utilityScript
     case support
@@ -164,8 +166,10 @@ enum PluginProtocol {
     static let maximumRegistry = 131_072
     static let maximumManifest = 131_072
     static let maximumBundle = 4_000_000
+    static let maximumNativeBundle = 96_000_000
     static let maximumScript = 2_000_000
     static let maximumFile = 1_000_000
+    static let maximumNativeFile = 16_000_000
 
     static func verifiedPayload(_ data: Data, publicKey: Data) throws -> Data {
         guard data.count <= maximumManifest else { throw Failure.invalid }
@@ -213,7 +217,8 @@ enum PluginProtocol {
         guard !name.isEmpty, name.utf8.count <= 200, !name.hasPrefix("/"),
               !name.contains("\\"), !name.contains(":"), !name.contains("\0") else { return false }
         let parts = name.split(separator: "/", omittingEmptySubsequences: false)
-        guard parts.count <= 4, parts.allSatisfy({
+        let maximumDepth = parts.count >= 2 && parts[0].hasSuffix(".app") && parts[1] == "Contents" ? 12 : 4
+        guard parts.count <= maximumDepth, parts.allSatisfy({
             !$0.isEmpty && !$0.hasPrefix(".") && $0 != ".."
                 && $0.range(of: #"^[A-Za-z0-9 _.\-]+$"#, options: .regularExpression) != nil
         }) else { return false }
@@ -286,6 +291,7 @@ enum PluginProtocol {
               !descriptor.summary.isEmpty, descriptor.summary.count <= 160,
               validSymbol(descriptor.symbol), validVersion(descriptor.minClientVersion),
               !descriptor.capabilities.isEmpty,
+              (!descriptor.capabilities.contains(.macOSApplication) || supports(clientVersion: descriptor.minClientVersion, minimum: "1.10.0")),
               Set(descriptor.capabilities).count == descriptor.capabilities.count,
               descriptor.supportDirectoryName.map(validSupportName) ?? true,
               descriptor.nativeMessagingHost.map({ validRelativePath($0) }) ?? true,
@@ -293,7 +299,7 @@ enum PluginProtocol {
               (descriptor.legacyNames ?? []).count <= 8,
               (descriptor.legacyNames ?? []).allSatisfy(validLegacyName),
               release.sha256.range(of: #"^[0-9a-f]{64}$"#, options: .regularExpression) != nil,
-              release.size > 0, release.size <= maximumBundle,
+              release.size > 0, release.size <= (descriptor.capabilities.contains(.macOSApplication) ? maximumNativeBundle : maximumBundle),
               let url = URL(string: release.url), url.scheme == policy.downloadScheme,
               url.host == policy.downloadHost, policy.allowPort || url.port == nil,
               url.user == nil, url.password == nil, url.query == nil, url.fragment == nil,
@@ -301,18 +307,26 @@ enum PluginProtocol {
               url.pathExtension == (descriptor.isBundle ? "json" : "py")
         else { throw Failure.invalid }
         try validateFiles(release.files, id: pluginID, kind: descriptor.kind)
+        guard descriptor.capabilities.contains(.macOSApplication) == release.files.contains(where: { $0.role == .application }) else { throw Failure.invalid }
         return release
     }
 
     static func validateFiles(_ files: [PluginFile], id: String, kind: String) throws {
-        guard !files.isEmpty, files.count <= 32 else { throw Failure.invalid }
+        guard !files.isEmpty, files.count <= 512 else { throw Failure.invalid }
         var seen = Set<String>()
         for file in files {
             guard validRelativePath(file.path), !seen.contains(file.path) else { throw Failure.invalid }
             seen.insert(file.path)
             guard file.sha256.range(of: #"^[0-9a-f]{64}$"#, options: .regularExpression) != nil,
-                  file.size > 0, file.size <= maximumFile else { throw Failure.invalid }
+                  file.size > 0, file.size <= (file.role == .application ? maximumNativeFile : maximumFile) else { throw Failure.invalid }
             if let name = file.installName, !validInstallName(name) { throw Failure.invalid }
+        }
+        let appFiles = files.filter { $0.role == .application }
+        if !appFiles.isEmpty {
+            let roots = Set(appFiles.compactMap { $0.path.split(separator: "/").first.map(String.init) })
+            guard roots.count == 1, let root = roots.first, root.hasSuffix(".app"),
+                  appFiles.allSatisfy({ $0.path.hasPrefix(root + "/Contents/") }),
+                  files.allSatisfy({ !$0.path.hasPrefix(root + "/") || $0.role == .application }) else { throw Failure.invalid }
         }
         let roles = files.map(\.role)
         if kind == "script" {
@@ -336,7 +350,7 @@ enum PluginProtocol {
         }
         guard let container = try? JSONDecoder().decode(Container.self, from: data),
               container.format == 1, container.id == release.descriptor.id,
-              container.version == release.version, container.files.count <= 32 else {
+              container.version == release.version, container.files.count <= 512 else {
             throw Failure.invalid
         }
         var result: [String: Data] = [:]
@@ -344,10 +358,10 @@ enum PluginProtocol {
         for item in release.files {
             guard let encoded = container.files[item.path],
                   let file = Data(base64Encoded: encoded),
-                  file.count == item.size, file.count <= maximumFile,
+                  file.count == item.size, file.count <= (item.role == .application ? maximumNativeFile : maximumFile),
                   digest(file) == item.sha256 else { throw Failure.corrupted }
             total += file.count
-            guard total <= maximumBundle else { throw Failure.corrupted }
+            guard total <= (release.descriptor.capabilities.contains(.macOSApplication) ? maximumNativeBundle : maximumBundle) else { throw Failure.corrupted }
             result[item.path] = file
         }
         guard result.count == container.files.count else { throw Failure.corrupted }

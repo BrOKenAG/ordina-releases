@@ -97,6 +97,7 @@ def main():
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument('--output', type=Path, default=ROOT / 'dist' / 'app-acceptance')
     parser.add_argument('--port', type=int, default=PORT)
+    parser.add_argument('--native-fixture', action='store_true', help='增加隔离原生复合插件样例')
     parser.add_argument('--app', type=Path, default=DEBUG_APP,
                         help='隔离验收必须指向 Debug 产物（lab 开关只在 DEBUG 构建生效）')
     args = parser.parse_args()
@@ -207,6 +208,47 @@ def main():
         (repo / 'plugins' / 'registry.source.json').read_text(encoding='utf-8'))
     assert EXISTING_ID in source_after['plugins'], '初始插件未写入隔离仓库'
 
+    if args.native_fixture:
+        native_id = 'native-composite-lab'
+        native_repo = f'BrOKenAG/ordina-plugin-{native_id}'
+        (labroot / 'lab' / 'assets' / native_repo).mkdir(parents=True, exist_ok=True)
+        native_source = out / 'src-native' / native_id
+        write_plugin(native_source, native_id, '1.0.0', 'native composite')
+        app = native_source / 'Example.app'
+        executable = app / 'Contents/MacOS/Example'
+        executable.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile('/usr/bin/true', executable)
+        executable.chmod(0o700)
+        (app / 'Contents/Info.plist').write_bytes(plistlib.dumps({
+            'CFBundleIdentifier': 'test.ordina.composite', 'CFBundleExecutable': 'Example',
+            'CFBundleName': 'Example', 'CFBundlePackageType': 'APPL', 'CFBundleVersion': '1'}))
+        subprocess.run(['/usr/bin/codesign', '--force', '--sign', '-', str(app)],
+                       check=True, capture_output=True)
+        (native_source / 'engine.py').write_text('# isolated engine fixture\n')
+        (native_source / 'host.command').write_text('#!/bin/sh\nexit 0\n')
+        (native_source / 'chrome.json').write_text(json.dumps({
+            'name': 'test.ordina.composite',
+            'allowed_origins': ['chrome-extension://' + 'a' * 32 + '/']}))
+        metadata = json.loads((native_source / 'plugin.json').read_text())
+        metadata.update(name='Native Composite Lab', summary='隔离复合插件样例',
+                        supportDirectoryName='Native Composite Lab', nativeMessagingHost='host.command')
+        metadata['capabilities'] += ['macos.application', 'chrome.nativeMessagingHost']
+        metadata['files'].update({
+            'engine.py': {'role': 'support'},
+            'host.command': {'role': 'nativeMessagingHost', 'executable': True},
+            'chrome.json': {'role': 'nativeMessagingManifest', 'installName': 'test.ordina.composite.json'},
+        })
+        for path in app.rglob('*'):
+            if path.is_file():
+                metadata['files'][path.relative_to(native_source).as_posix()] = {
+                    'role': 'application', 'executable': path == executable}
+        (native_source / 'plugin.json').write_text(json.dumps(metadata), encoding='utf-8')
+        native_zip = zip_plugin(native_source, out / 'native-composite.zip')
+        tool = tools / 'ordina-publisher-1.1.0.pyz'
+        preview = run_tool(tool, ['preview', '--zip', str(native_zip), '--notes', '隔离原生样例'], env)
+        run_tool(tool, ['publish', '--zip', str(native_zip), '--notes', '隔离原生样例',
+                        '--expect-fingerprint', preview['fingerprint'], '--execute'], env)
+
     # --- test ZIP materials ---------------------------------------------
     update_source = packages / 'src-update' / EXISTING_ID
     write_plugin(update_source, EXISTING_ID, '1.1.0', 'update')
@@ -309,6 +351,8 @@ TOTP 仅保护本机交互，实际发布仍由发布引擎独立验证权限和
 正式 1.10.0 出包另用 `bash scripts/local_xcode_build.sh --all`，与本次隔离验收分开。）
 
 ## App 内只做这些操作
+
+若目录包含 Native Composite Lab，首页插件管理中可安装和卸载该隔离样例；其 App 与引擎是测试占位，不执行真实粗剪。Chrome 扩展首次需按照提示手动加载一次，后续更新沿用同一目录。样例使用专用隔离签名配置，仅供验收。
 
 1. 首页插件入口 → 安装 Demo Lab Notes，关闭插件页。
 2. 设置 → 连点版本号 **10 次** →「测试选项」→ 开发者中心并启用。

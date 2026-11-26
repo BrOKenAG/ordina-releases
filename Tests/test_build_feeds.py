@@ -20,6 +20,14 @@ class FeedDerivationTests(unittest.TestCase):
         self.assertTrue(self.plugins['minutes']['published'])
         self.assertFalse(self.plugins['yueliu']['published'])
 
+    def test_registry_keeps_old_clients_compatible_with_native_capability(self):
+        source = copy.deepcopy(self.plugins['minutes'])
+        source['capabilities'] = ['resolve.utilityScript', 'macos.application']
+        source['minClientVersion'] = '1.10.0'
+        entry = bf.registry_descriptor('minutes', source)
+        self.assertEqual(entry['capabilities'], ['resolve.utilityScript'])
+        self.assertIn('macos.application', source['capabilities'])
+
     def test_registry_carries_descriptor_but_no_asset_secrets(self):
         registry, legacy, per_plugin = bf.documents(self.plugins)
         self.assertEqual(registry['format'], 2)

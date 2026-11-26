@@ -1,5 +1,6 @@
 import Foundation
 import Darwin
+import Security
 
 // One installer for every plugin, driven only by the signed descriptor and file
 // inventory. Capabilities are compiled into the client: a descriptor selects
@@ -119,6 +120,10 @@ enum PluginInstaller {
     private static func performInstall(_ release: PluginRelease, files: [String: Data],
                                        environment: PluginEnvironment) throws {
         let descriptor = release.descriptor
+        try PluginProtocol.validateFiles(release.files, id: descriptor.id, kind: descriptor.kind)
+        guard descriptor.capabilities.contains(.macOSApplication) == release.files.contains(where: { $0.role == .application }) else {
+            throw PluginProtocol.Failure.invalid
+        }
         guard PluginProtocol.supports(clientVersion: environment.clientVersion,
                                       minimum: descriptor.minClientVersion) else {
             throw Failure.incompatible(descriptor.minClientVersion)
@@ -133,6 +138,9 @@ enum PluginInstaller {
         let staging = stateDirectory.appendingPathComponent("staging-" + UUID().uuidString)
         try manager.createDirectory(at: staging, withIntermediateDirectories: true)
         defer { try? manager.removeItem(at: staging) }
+
+        // Verify the complete reconstructed native bundle before any target is modified.
+        try verifyNativeApplication(release, files: files, staging: staging, environment: environment)
 
         // Stage every payload first. A failure here leaves the existing
         // installation untouched.
@@ -150,7 +158,7 @@ enum PluginInstaller {
         let backup = stateDirectory
             .appendingPathComponent("backups", isDirectory: true)
             .appendingPathComponent(timestamp(), isDirectory: true)
-        var applied: [(target: URL, backup: URL?, existed: Bool)] = []
+        var applied: [(target: URL, backup: URL?, existed: Bool, permissions: NSNumber?)] = []
         do {
             for (index, item) in staged.enumerated() {
                 let target = try checkedPath(home: environment.home, relative: item.relative)
@@ -158,10 +166,15 @@ enum PluginInstaller {
                                             withIntermediateDirectories: true)
                 let exists = manager.fileExists(atPath: target.path)
                 var saved: URL?
+                let permissions = exists ? (try manager.attributesOfItem(atPath: target.path)[.posixPermissions] as? NSNumber) : nil
                 if exists {
                     let current = try Data(contentsOf: target)
                     if current == item.data {
-                        applied.append((target, nil, true))
+                        applied.append((target, nil, true, permissions))
+                        let desired = item.executable ? 0o700 : 0o600
+                        if permissions?.intValue != desired {
+                            try manager.setAttributes([.posixPermissions: desired], ofItemAtPath: target.path)
+                        }
                         continue
                     }
                     let destination = backup.appendingPathComponent("\(index)-" + target.lastPathComponent)
@@ -177,10 +190,26 @@ enum PluginInstaller {
                 } else {
                     try manager.moveItem(at: temporary, to: target)
                 }
-                if item.executable {
-                    try manager.setAttributes([.posixPermissions: 0o700], ofItemAtPath: target.path)
+                applied.append((target, saved, exists, permissions))
+                try manager.setAttributes([.posixPermissions: item.executable ? 0o700 : 0o600], ofItemAtPath: target.path)
+            }
+
+            // Remove obsolete, unmodified files from earlier versions inside the
+            // same transaction; preserve any user-modified files.
+            if let previous = state(descriptor.id, environment: environment) {
+                let desired = Set(staged.map(\.relative))
+                for (index, item) in previous.files.enumerated() where !desired.contains(item.target) {
+                    let target = try checkedPath(home: environment.home, relative: item.target)
+                    guard manager.fileExists(atPath: target.path),
+                          let current = try? Data(contentsOf: target),
+                          PluginProtocol.digest(current) == item.sha256 else { continue }
+                    let saved = backup.appendingPathComponent("obsolete-\(index)-" + target.lastPathComponent)
+                    try manager.createDirectory(at: backup, withIntermediateDirectories: true)
+                    try current.write(to: saved, options: .atomic)
+                    let permissions = try manager.attributesOfItem(atPath: target.path)[.posixPermissions] as? NSNumber
+                    try manager.removeItem(at: target)
+                    applied.append((target, saved, true, permissions))
                 }
-                applied.append((target, saved, exists))
             }
 
             let recorded = staged.map {
@@ -200,8 +229,13 @@ enum PluginInstaller {
             for record in applied.reversed() {
                 if let saved = record.backup, let data = try? Data(contentsOf: saved) {
                     try? data.write(to: record.target, options: .atomic)
+                    if let permissions = record.permissions {
+                        try? manager.setAttributes([.posixPermissions: permissions], ofItemAtPath: record.target.path)
+                    }
                 } else if !record.existed {
                     try? manager.removeItem(at: record.target)
+                } else if let permissions = record.permissions {
+                    try? manager.setAttributes([.posixPermissions: permissions], ofItemAtPath: record.target.path)
                 }
             }
             throw Failure.writeFailed(error.localizedDescription)
@@ -227,35 +261,59 @@ enum PluginInstaller {
         try withFileLock(environment) {
             let manager = FileManager.default
             let record = state(descriptor.id, environment: environment)
-            let backup = environment.stateDirectory(descriptor.id)
-                .appendingPathComponent("backups", isDirectory: true)
-                .appendingPathComponent("uninstall-" + timestamp(), isDirectory: true)
+            let stateDirectory = environment.stateDirectory(descriptor.id)
+            let staging = stateDirectory.appendingPathComponent("uninstall-" + UUID().uuidString, isDirectory: true)
             var targets: [URL] = []
             if let record {
                 for file in record.files {
                     targets.append(try checkedPath(home: environment.home, relative: file.target))
                 }
             } else {
-                targets.append(utilityTarget(descriptor, environment: environment))
+                targets.append(try checkedPath(home: environment.home,
+                    relative: relative(utilityTarget(descriptor, environment: environment), home: environment.home)))
                 for name in descriptor.legacyNames ?? [] {
-                    targets.append(environment.utilityDirectory.appendingPathComponent(name))
+                    targets.append(try checkedPath(home: environment.home,
+                        relative: relative(environment.utilityDirectory.appendingPathComponent(name), home: environment.home)))
                 }
             }
-            for target in targets {
-                guard manager.fileExists(atPath: target.path) else { continue }
-                if let record, let saved = record.files.first(where: {
-                    environment.home.appendingPathComponent($0.target).standardizedFileURL
-                        == target.standardizedFileURL
-                }), let data = try? Data(contentsOf: target),
-                   PluginProtocol.digest(data) != saved.sha256 {
-                    try manager.createDirectory(at: backup, withIntermediateDirectories: true)
-                    try data.write(to: backup.appendingPathComponent(
-                        UUID().uuidString + "-" + target.lastPathComponent), options: .atomic)
+            try manager.createDirectory(at: staging, withIntermediateDirectories: true)
+            var moved: [(original: URL, backup: URL)] = []
+            do {
+                for (index, target) in targets.enumerated() {
+                    guard manager.fileExists(atPath: target.path) else { continue }
+                    if let record, let saved = record.files.first(where: {
+                        environment.home.appendingPathComponent($0.target).standardizedFileURL == target.standardizedFileURL
+                    }) {
+                        let data = try Data(contentsOf: target)
+                        // Changed files may contain user data and are not removed.
+                        if PluginProtocol.digest(data) != saved.sha256 { continue }
+                    }
+                    let backup = staging.appendingPathComponent(String(index))
+                    try manager.moveItem(at: target, to: backup)
+                    moved.append((target, backup))
                 }
-                try manager.removeItem(at: target)
+                let stateFile = environment.stateFile(descriptor.id)
+                if manager.fileExists(atPath: stateFile.path) {
+                    let backup = staging.appendingPathComponent("state.json")
+                    try manager.moveItem(at: stateFile, to: backup)
+                    moved.append((stateFile, backup))
+                }
+            } catch {
+                var rollbackFailed = false
+                for item in moved.reversed() {
+                    do { try manager.moveItem(at: item.backup, to: item.original) }
+                    catch { rollbackFailed = true }
+                }
+                if rollbackFailed {
+                    throw Failure.writeFailed("卸载回滚未完成，备份保留在 " + staging.path)
+                }
+                try? manager.removeItem(at: staging)
+                throw Failure.writeFailed(error.localizedDescription)
             }
-            let stateDirectory = environment.stateDirectory(descriptor.id)
-            try? manager.removeItem(at: stateDirectory)
+            try? manager.removeItem(at: staging)
+            if let remaining = try? manager.contentsOfDirectory(atPath: stateDirectory.path), remaining.isEmpty {
+                try? manager.removeItem(at: stateDirectory)
+            }
             // Remove now-empty plugin-owned subdirectories (for example
             // extension/) without touching anything the user added.
             if let support = supportDirectory(descriptor, environment: environment) {
@@ -342,7 +400,7 @@ enum PluginInstaller {
                     relative: relative(environment.utilityDirectory.appendingPathComponent(name),
                                        home: environment.home),
                     data: data, executable: item.executable ?? false, role: item.role))
-            case .support, .nativeMessagingHost, .extension:
+            case .support, .nativeMessagingHost, .extension, .application:
                 guard let support = supportDirectory(descriptor, environment: environment) else {
                     throw Failure.writeFailed(item.path)
                 }
@@ -369,6 +427,55 @@ enum PluginInstaller {
             }
         }
         return result
+    }
+
+    private static func verifyNativeApplication(_ release: PluginRelease, files: [String: Data],
+                                                staging: URL, environment: PluginEnvironment) throws {
+        let native = release.files.filter { $0.role == .application }
+        guard !native.isEmpty else { return }
+        guard release.descriptor.capabilities.contains(.macOSApplication),
+              let root = native.first?.path.split(separator: "/").first.map(String.init),
+              root.hasSuffix(".app"), native.allSatisfy({ $0.path.hasPrefix(root + "/Contents/") }) else {
+            throw Failure.writeFailed("原生 App 结构无效")
+        }
+        let manager = FileManager.default
+        for item in native {
+            guard let data = files[item.path], data.count == item.size,
+                  PluginProtocol.digest(data) == item.sha256 else { throw PluginProtocol.Failure.corrupted }
+            let destination = staging.appendingPathComponent(item.path)
+            try manager.createDirectory(at: destination.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try data.write(to: destination, options: .atomic)
+            if item.executable == true { try manager.setAttributes([.posixPermissions: 0o700], ofItemAtPath: destination.path) }
+        }
+        let application = staging.appendingPathComponent(root)
+        func run(_ executable: String, _ arguments: [String]) throws -> String {
+            let process = Process(); let output = Pipe()
+            process.executableURL = URL(fileURLWithPath: executable)
+            process.arguments = arguments; process.standardOutput = output; process.standardError = output
+            try process.run()
+            let data = output.fileHandleForReading.readDataToEndOfFile()
+            process.waitUntilExit()
+            guard process.terminationStatus == 0 else { throw Failure.writeFailed("原生 App 签名或公证验证失败") }
+            return String(decoding: data, as: UTF8.self)
+        }
+        _ = try run("/usr/bin/codesign", ["--verify", "--deep", "--strict", application.path])
+        #if DEBUG || ORDINA_LAB
+        if ProcessInfo.processInfo.environment["ORDINA_PLUGIN_LAB"] == "1",
+           environment.policy.feedScheme == "http" { return }
+        #endif
+        var staticCode: SecStaticCode?
+        guard SecStaticCodeCreateWithPath(application as CFURL, [], &staticCode) == errSecSuccess,
+              let staticCode else { throw Failure.writeFailed("原生 App 签名无效") }
+        var requirement: SecRequirement?
+        let rule = "anchor apple generic and certificate leaf[field.1.2.840.113635.100.6.1.13] exists" as CFString
+        guard SecRequirementCreateWithString(rule, [], &requirement) == errSecSuccess,
+              let requirement, SecStaticCodeCheckValidity(staticCode, SecCSFlags(rawValue: kSecCSCheckAllArchitectures | kSecCSStrictValidate), requirement) == errSecSuccess else {
+            throw Failure.writeFailed("原生 App 不是有效的 Developer ID 签名")
+        }
+        let assessment = try run("/usr/sbin/spctl", ["--assess", "--verbose=4", "--type", "execute", application.path])
+        guard assessment.contains("source=Notarized Developer ID") else {
+            throw Failure.writeFailed("原生 App 未通过公证验证")
+        }
     }
 
     private static func generatedManifest(template: Data, descriptor: PluginDescriptor,
