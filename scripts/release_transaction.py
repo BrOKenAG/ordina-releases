@@ -321,6 +321,9 @@ class LocalGateway(Gateway):
         raise ValueError('无法确认 Release 是否存在，请检查网络与授权后重试。')
 
     def create_release(self, repository, tag, asset_path, title, notes, latest=False):
+        if repository.startswith('BrOKenAG/ordina-plugin-'):
+            from dev_publish import authorize_direct_plugin_write
+            authorize_direct_plugin_write({'BrOKenAG/ordina-releases', repository})
         command = ['gh', 'release', 'create', tag, str(asset_path),
                    '--repo', repository, '--title', title, '--notes', notes]
         command.append('--latest' if latest else '--latest=false')

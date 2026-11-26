@@ -120,6 +120,13 @@ struct VerifyDeveloperCenter {
         let after = DeveloperCenterModel.localJournals()
         try require(after.count == 2, "completed journal disappeared")
 
+        let rolling = DeveloperPaths.journals.appendingPathComponent("rolling.json")
+        try JSONSerialization.data(withJSONObject: ["status": "rolling_back",
+                                                   "repositories": [:]]).write(to: rolling)
+        try require(PendingTransactions.count() == 2, "interrupted rollback must block a tool update")
+        let rollingEntry = DeveloperCenterModel.localJournals().first { $0.journal.hasSuffix("rolling.json") }
+        try require(rollingEntry?.rollbackable == true, "interrupted rollback must remain recoverable")
+
         // A rolled back transaction is still listed, and never resumable.
         let rolled = DeveloperPaths.journals.appendingPathComponent("rolled.json")
         try JSONSerialization.data(withJSONObject: ["status": "rolled_back",

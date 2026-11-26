@@ -22,6 +22,10 @@ protocol DeveloperPublishing: Sendable {
                 onEvent: @escaping @Sendable (DevEvent) -> Void) async throws -> DevAction
     func rollback(journal: String, reason: String) async throws -> DevAction
     func history() async throws -> DevHistory
+    func lifecyclePlugins() async throws -> [DevLifecyclePlugin]
+    func lifecyclePreview(id: String, published: Bool) async throws -> DevLifecyclePreview
+    func lifecycleSet(_ preview: DevLifecyclePreview,
+                      onEvent: @escaping @Sendable (DevEvent) -> Void) async throws -> DevAction
     func credentialStatus() async throws -> DevCredentialStatus
     func importCredential(file: URL) async throws -> DevCredentialStatus
 }
@@ -49,6 +53,10 @@ struct RemotePublisherService: DeveloperPublishing {
     }
     func rollback(journal: String, reason: String) async throws -> DevAction { throw unavailable() }
     func history() async throws -> DevHistory { throw unavailable() }
+    func lifecyclePlugins() async throws -> [DevLifecyclePlugin] { throw unavailable() }
+    func lifecyclePreview(id: String, published: Bool) async throws -> DevLifecyclePreview { throw unavailable() }
+    func lifecycleSet(_ preview: DevLifecyclePreview,
+                      onEvent: @escaping @Sendable (DevEvent) -> Void) async throws -> DevAction { throw unavailable() }
     func credentialStatus() async throws -> DevCredentialStatus { throw unavailable() }
     func importCredential(file: URL) async throws -> DevCredentialStatus { throw unavailable() }
 }
@@ -312,6 +320,30 @@ struct LocalPublisherTool: DeveloperPublishing {
     func history() async throws -> DevHistory {
         try await Task.detached(priority: .utility) {
             try value(DevHistory.self, from: call(["history"]))
+        }.value
+    }
+
+    func lifecyclePlugins() async throws -> [DevLifecyclePlugin] {
+        struct Payload: Decodable { let plugins: [DevLifecyclePlugin] }
+        return try await Task.detached(priority: .utility) {
+            try value(Payload.self, from: call(["lifecycle-list"], timeout: 60)).plugins
+        }.value
+    }
+
+    func lifecyclePreview(id: String, published: Bool) async throws -> DevLifecyclePreview {
+        try await Task.detached(priority: .userInitiated) {
+            try value(DevLifecyclePreview.self, from: call(["lifecycle-preview", "--plugin-id", id,
+                                                             "--published", published ? "yes" : "no"], timeout: 120))
+        }.value
+    }
+
+    func lifecycleSet(_ preview: DevLifecyclePreview,
+                      onEvent: @escaping @Sendable (DevEvent) -> Void) async throws -> DevAction {
+        try await Task.detached(priority: .userInitiated) {
+            try value(DevAction.self, from: call(["lifecycle-set", "--plugin-id", preview.id,
+                                                 "--published", preview.published ? "yes" : "no",
+                                                 "--expect-fingerprint", preview.fingerprint, "--execute"],
+                                                timeout: 900, onEvent: onEvent))
         }.value
     }
 

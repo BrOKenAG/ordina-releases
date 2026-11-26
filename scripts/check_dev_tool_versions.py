@@ -1,11 +1,8 @@
 #!/usr/bin/env python3
 """Verify one coherent version across the developer-tool release channel.
 
-There is exactly one production tool version. ``1.1.0`` exists only as the
-second, throwaway build inside the end-to-end acceptance run; it must never
-appear in the tool manifest, the release tag, the upload command or the
-archive on disk. This script checks every place a version is declared and
-also re-checks the production archive's integrity and purity.
+Preserve historical versions and verify the latest candidate, its archive,
+signed manifest and release instructions without reading a private key.
 
     python3 scripts/check_dev_tool_versions.py
 """
@@ -33,6 +30,22 @@ def require(condition, message):
         raise AssertionError(message)
 
 
+def current_entry(entries, version):
+    def parsed(value):
+        require(isinstance(value, str) and re.fullmatch(r'\d+(?:\.\d+){1,3}', value),
+                '工具版本格式无效')
+        parts = [int(part) for part in value.split('.')]
+        return tuple(parts + [0] * (4 - len(parts)))
+    require(isinstance(entries, list) and entries, '工具清单没有版本')
+    versions = [parsed(item.get('version')) for item in entries]
+    require(len(set(versions)) == len(versions), '工具清单存在重复版本')
+    wanted = parsed(version)
+    require(wanted == max(versions), '当前候选版本不是最新版本')
+    matches = [item for item in entries if item['version'] == version]
+    require(len(matches) == 1, '找不到唯一的当前候选版本')
+    return matches[0]
+
+
 def main():
     version = build_dev_tool.read_version()
     checks, details = {}, {}
@@ -57,8 +70,7 @@ def main():
     entries = source['versions']
 
     def manifest_version():
-        require(len(entries) == 1, f'正式工具通道应只有 1 个版本，实际 {len(entries)} 个')
-        entry = entries[0]
+        entry = current_entry(entries, version)
         require(entry['version'] == version, entry)
         require(entry['protocol'] == 1 and entry['minClientVersion'] == '1.10.0', entry)
         require(entry['asset'] == f'ordina-publisher-{version}.pyz', entry)
@@ -76,23 +88,12 @@ def main():
         envelope = json.loads(raw)
         payload = json.loads(base64.b64decode(envelope['payload'], validate=True))
         require(payload == source, '签名清单内容与 manifest.source.json 不一致')
-        # Verify the signature with the pinned release key when the Sparkle
-        # tools are available; structure-only comparison is always performed.
-        tools = Path(__import__('os').environ.get(
-            'ORDINA_SPARKLE_TOOLS', '')) / 'bin' / 'sign_update'
-        verified = None
-        if tools.is_file():
-            probe = ROOT / 'dev-tool' / '.verify-payload'
-            probe.write_bytes(base64.b64decode(envelope['payload']))
-            try:
-                result = subprocess.run(
-                    [str(tools), '--account', 'ordina-sparkle', '--verify',
-                     str(probe), envelope['signature']],
-                    capture_output=True, text=True, timeout=30)
-                verified = result.returncode == 0
-                require(verified, '签名清单未通过生产密钥验签：' + result.stderr.strip())
-            finally:
-                probe.unlink(missing_ok=True)
+        import ed25519_verify
+        from feed_signing import PRODUCTION_PUBLIC_KEY
+        verified = ed25519_verify.verify(PRODUCTION_PUBLIC_KEY,
+                                          base64.b64decode(envelope['payload'], validate=True),
+                                          base64.b64decode(envelope['signature'], validate=True))
+        require(verified, '签名清单未通过官方公钥验签')
         return {'payloadMatches': True, 'signatureVerified': verified}
     check('signed_manifest', signed_manifest)
 
@@ -100,7 +101,7 @@ def main():
         archive = ROOT / 'dist' / 'dev-tool' / f'ordina-publisher-{version}.pyz'
         require(archive.is_file(), f'缺少生产工具包 {archive}')
         data = archive.read_bytes()
-        entry = entries[0]
+        entry = current_entry(entries, version)
         require(hashlib.sha256(data).hexdigest() == entry['sha256'],
                 '工具包 SHA-256 与清单不一致')
         require(len(data) == entry['size'], '工具包大小与清单不一致')
@@ -113,9 +114,15 @@ def main():
         require(not (names & LAB_MODULES), '生产工具含实验室模块')
         require(not any(name.startswith(('test_', 'verify_')) for name in names),
                 '生产工具含测试模块')
-        stray = [path.name for path in (ROOT / 'dist' / 'dev-tool').glob('*.pyz')
-                 if path.name != f'ordina-publisher-{version}.pyz']
-        require(not stray, '发布目录存在其它版本工具包：' + str(stray))
+        known = {item['asset']: item for item in entries}
+        stray = []
+        for path in (ROOT / 'dist' / 'dev-tool').glob('*.pyz'):
+            if path.name not in known:
+                stray.append(path.name)
+            else:
+                require(hashlib.sha256(path.read_bytes()).hexdigest() == known[path.name]['sha256'],
+                        f'历史资产摘要不一致：{path.name}')
+        require(not stray, '发布目录存在未知版本工具包：' + str(stray))
         return {'sha256': entry['sha256'][:16], 'size': len(data),
                 'strayArchives': stray}
     check('archive_version', archive_version)
@@ -139,14 +146,13 @@ def main():
         declared |= set(re.findall(r'ordina-publisher-([0-9.]+)\.pyz', text))
         require(declared == {version},
                 f'上线命令/标签中的版本不一致：{sorted(declared)} != {version}')
-        require('1.1.0' not in declared, '验收用的 1.1.0 混入了正式发布命令')
         return {'versions': sorted(declared)}
     check('release_commands', release_commands)
 
     def acceptance_reports():
         developer = json.loads((ROOT / 'docs' / 'validation' /
                                 'developer-center.json').read_text())
-        require(developer.get('productionToolVersion') == version, developer)
+        require(developer.get('candidateToolVersion') == version, developer)
         require(developer.get('productionSigningKeyUsed') is False,
                 '验收报告声称使用了生产签名密钥')
         require(developer.get('trustChain') == 'isolated-lab-key', developer)
@@ -156,13 +162,14 @@ def main():
             value = json.loads(standalone.read_text())
             require(value.get('toolVersion') == version, value)
             require(value.get('passed') is True, '独立部署验收未通过')
-        return {'productionToolVersion': version,
+        return {'candidateToolVersion': version,
                 'labToolVersions': developer['labToolVersions']}
     check('acceptance_reports', acceptance_reports)
 
     passed = all(value == 'pass' for value in checks.values())
     report = {
-        'format': 1, 'passed': passed, 'productionToolVersion': version,
+        'format': 1, 'passed': passed, 'productionToolVersion': None,
+        'candidateToolVersion': version,
         'checks': checks, 'details': details,
         'timestamp': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()),
     }

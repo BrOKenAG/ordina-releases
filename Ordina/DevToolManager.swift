@@ -310,7 +310,7 @@ enum PendingTransactions {
             guard let data = try? Data(contentsOf: file),
                   let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                   let status = object["status"] as? String else { continue }
-            if status == "preparing" || status == "publishing" { total += 1 }
+            if status == "preparing" || status == "publishing" || status == "rolling_back" { total += 1 }
         }
         return total
     }

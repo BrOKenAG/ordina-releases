@@ -54,6 +54,19 @@ struct DeveloperCenterHarness {
                 emit(try rollback(journal, reason: flag("--reason", arguments) ?? ""))
             case "journal-list":
                 emit(["ok": true, "journals": journals().map(describe)])
+            case "lifecycle-list":
+                let items = try tool().lifecyclePluginsBlocking()
+                emit(["ok": true, "plugins": items.map { ["id": $0.id, "published": $0.published] }])
+            case "lifecycle-preview":
+                let id = try value(after: command, in: arguments)
+                let preview = try tool().lifecyclePreviewBlocking(id: id, published: flag("--published", arguments) == "yes")
+                emit(["ok": true, "fingerprint": preview.fingerprint, "published": preview.published])
+            case "lifecycle-set":
+                let id = try value(after: command, in: arguments)
+                let tool = try tool()
+                let preview = try tool.lifecyclePreviewBlocking(id: id, published: flag("--published", arguments) == "yes")
+                let result = try tool.lifecycleSetBlocking(preview)
+                emit(["ok": true, "journal": result.journal, "status": result.status])
             case "pending":
                 emit(["ok": true, "pending": PendingTransactions.count()])
             default:
@@ -246,6 +259,15 @@ struct DeveloperCenterHarness {
 // Synchronous wrappers around the async contract, so the harness stays a plain
 // command-line program while exercising the exact same client code paths.
 extension LocalPublisherTool {
+    func lifecyclePluginsBlocking() throws -> [DevLifecyclePlugin] {
+        try awaitSync { try await lifecyclePlugins() }
+    }
+    func lifecyclePreviewBlocking(id: String, published: Bool) throws -> DevLifecyclePreview {
+        try awaitSync { try await lifecyclePreview(id: id, published: published) }
+    }
+    func lifecycleSetBlocking(_ preview: DevLifecyclePreview) throws -> DevAction {
+        try awaitSync { try await lifecycleSet(preview) { _ in } }
+    }
     func inspectBlocking(zip: URL) throws -> DevInspection { try awaitSync { try await inspect(zip: zip) } }
     func localTestBlocking(zip: URL) throws -> DevLocalTest { try awaitSync { try await localTest(zip: zip) } }
     func previewBlocking(zip: URL, notes: String) throws -> DevPreview {

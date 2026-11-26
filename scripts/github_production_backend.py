@@ -77,6 +77,23 @@ class ProductionBackend(GitHubLabMultiBackend):
         if repo not in self.allowed:
             raise ValueError('repository is not explicitly authorized')
 
+    def _authorize_plugin_write(self):
+        if self.asset_repo.startswith('BrOKenAG/ordina-plugin-'):
+            from dev_publish import authorize_direct_plugin_write
+            authorize_direct_plugin_write(set(self.paths) | {self.asset_repo})
+
+    def acquire(self, token):
+        self._authorize_plugin_write()
+        return super().acquire(token)
+
+    def release(self, token):
+        self._authorize_plugin_write()
+        return super().release(token)
+
+    def write(self, repo, expected, data, token):
+        self._authorize_plugin_write()
+        return super().write(repo, expected, data, token)
+
     def verify_rollback(self, repo, head, data):
         """Compare the journal's old bytes against the immutable Git commit."""
         from github_lab_backend import api
@@ -192,6 +209,10 @@ class ProductionBackend(GitHubLabMultiBackend):
         data = self._fetch_public(primary)
         if len(data) != asset['size'] or hashlib.sha256(data).hexdigest() != asset['sha256']:
             raise RuntimeError('public asset hash mismatch')
+        if 'lifecycle' in plan:
+            import plugin_lifecycle
+            plugin_lifecycle.verify_transaction(plan, self)
+            return
         if asset.get('ed_signature'):
             from feed_signing import sign_tool
             from sparkle_tools import KEYCHAIN_ACCOUNT

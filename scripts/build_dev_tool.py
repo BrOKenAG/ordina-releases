@@ -43,7 +43,7 @@ MODULES = (
     'dev_publish.py', 'dev_credentials.py', 'dev_zip.py', 'durable_release.py',
     'durable_transaction.py', 'durable_journal.py', 'plugin_protocol.py',
     'publish_plugin.py', 'release_transaction.py', 'build_feeds.py',
-    'feed_signing.py', 'ed25519_verify.py', 'sparkle_tools.py', 'github_production_backend.py',
+    'feed_signing.py', 'ed25519_verify.py', 'plugin_lifecycle.py', 'sparkle_tools.py', 'github_production_backend.py',
     'github_lab_backend.py', 'check_feeds.py', 'rollback_feeds.py',
 )
 LAB_MODULES = ('dev_lab_backend.py', 'lab_signing.py')

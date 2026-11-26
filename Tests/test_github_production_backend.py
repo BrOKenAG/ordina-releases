@@ -5,6 +5,24 @@ sys.path.insert(0,str(ROOT/'scripts'))
 from github_production_backend import ProductionBackend
 
 class ProductionBackendTests(unittest.TestCase):
+ def test_plugin_backend_rejects_lab_mode_before_lock_write(self):
+  import os
+  from unittest.mock import patch
+  from github_lab_backend import GitHubLabMultiBackend
+  main='BrOKenAG/ordina-releases'; repo='BrOKenAG/ordina-plugin-demo'
+  backend=ProductionBackend(main,repo,'v1','a.json',{main:['registry.json']},{main,repo})
+  with patch.dict(os.environ,{'ORDINA_DEV_LAB':'1'}), patch.object(GitHubLabMultiBackend,'acquire') as acquire:
+   with self.assertRaises(Exception): backend.acquire('token')
+   acquire.assert_not_called()
+
+ def test_direct_release_creation_rejects_lab_before_gh(self):
+  import os
+  from unittest.mock import patch
+  from release_transaction import LocalGateway
+  with patch.dict(os.environ,{'ORDINA_DEV_LAB':'1'}), patch('release_transaction.subprocess.run') as run:
+   with self.assertRaises(Exception):
+    LocalGateway().create_release('BrOKenAG/ordina-plugin-demo','v1',Path('/tmp/a'),'title','notes')
+   run.assert_not_called()
  def test_rollback_snapshot_is_verified_against_git_commit(self):
   from unittest.mock import patch
   import base64

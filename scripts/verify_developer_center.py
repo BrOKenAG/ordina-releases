@@ -64,7 +64,8 @@ CHECKS = (
     'pending_blocks_tool_update',
     'resume_publish', 'tool_update', 'publish_after_tool_update',
     'rollback_release', 'tool_rollback', 'unsigned_credential',
-    'wrong_scope', 'records_preserved',
+    'wrong_scope', 'records_preserved', 'lifecycle_toggle', 'lifecycle_resume',
+    'lifecycle_rollback', 'lifecycle_unauthorized',
 )
 CLIENT_VERSION = '1.10.0'
 PLUGIN_ID = 'demo-lab-notes'
@@ -496,6 +497,53 @@ def main():
             return {'discovered': True, 'installed': '1.0.0', 'uninstalled': True}
         check('client_discovers_new_plugin', client_discovers)
 
+        def lifecycle_toggle():
+            status, listed = run('lifecycle-list')
+            require(status == 0 and any(x['id'] == PLUGIN_ID and x['published'] for x in listed['plugins']), listed)
+            status, result = run('lifecycle-set', PLUGIN_ID, '--published', 'no')
+            require(status == 0 and result.get('status') == 'complete', result)
+            registry, _ = decode_envelope(lab_blob('BrOKenAG/ordina-releases', 'registry.json'))
+            require(PLUGIN_ID not in registry['plugins'] and PLUGIN_ID in registry['withdrawn'], registry)
+            status, listed = run('lifecycle-list')
+            require(any(x['id'] == PLUGIN_ID and not x['published'] for x in listed['plugins']), listed)
+            status, result = run('lifecycle-set', PLUGIN_ID, '--published', 'yes')
+            require(status == 0 and result.get('status') == 'complete', result)
+            registry, _ = decode_envelope(lab_blob('BrOKenAG/ordina-releases', 'registry.json'))
+            require(PLUGIN_ID in registry['plugins'] and PLUGIN_ID not in registry.get('withdrawn', []), registry)
+            return {'withdrawn': True, 'republished': True}
+        check('lifecycle_toggle', lifecycle_toggle)
+
+        def lifecycle_resume():
+            status, result = run('lifecycle-set', PLUGIN_ID, '--published', 'no',
+                                 env={'ORDINA_DEV_LAB_FAIL_AFTER': '1'})
+            require(status != 0 and result.get('journal'), result)
+            status, result = run('resume', result['journal'])
+            require(status == 0 and result.get('status') == 'complete', result)
+            status, result = run('lifecycle-set', PLUGIN_ID, '--published', 'yes')
+            require(status == 0, result)
+            return {'resumed': True}
+        check('lifecycle_resume', lifecycle_resume)
+
+        def lifecycle_rollback():
+            status, result = run('lifecycle-set', PLUGIN_ID, '--published', 'no',
+                                 env={'ORDINA_DEV_LAB_FAIL_AFTER': '1'})
+            require(status != 0 and result.get('journal'), result)
+            status, result = run('rollback', result['journal'], '--reason', '隔离测试')
+            require(status == 0 and result.get('status') == 'rolled_back', result)
+            registry, _ = decode_envelope(lab_blob('BrOKenAG/ordina-releases', 'registry.json'))
+            require(PLUGIN_ID in registry['plugins'], registry)
+            return {'rolledBack': True}
+        check('lifecycle_rollback', lifecycle_rollback)
+
+        def lifecycle_unauthorized():
+            main = lab_root / 'lab/repos/BrOKenAG/ordina-releases/state.json'
+            before = main.read_bytes()
+            expect_failure('auth.', 'lifecycle-set', PLUGIN_ID, '--published', 'no',
+                           env={'ORDINA_DEV_CREDENTIALS': str(limited)})
+            require(main.read_bytes() == before, 'unauthorized operation changed registry')
+            return {'unchanged': True}
+        check('lifecycle_unauthorized', lifecycle_unauthorized)
+
         # 10. update the same plugin
         source_110 = workspace / 'src-1.1.0' / PLUGIN_ID
         write_plugin(source_110, PLUGIN_ID, '1.1.0', 'second')
@@ -747,7 +795,8 @@ def main():
         'clientVersion': CLIENT_VERSION,
         'compiledOnce': True,
         'harnessSha256': harness_digest,
-        'productionToolVersion': '1.0.0',
+        'productionToolVersion': None,
+        'candidateToolVersion': build_dev_tool.read_version(),
         'labToolVersions': ['1.0.0', '1.1.0'],
         'activeToolVersionAtEnd': '1.0.0',
         'toolProtocol': 1,

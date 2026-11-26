@@ -83,6 +83,15 @@ class DurableTests(unittest.TestCase):
         with self.assertRaises(RuntimeError): tx.publish(self.plan,self.path,self.remote)
         self.assertEqual(self.remote.values['one'],b'old-one')
         self.assertEqual(self.remote.values['two'],b'old-two')
+
+    def test_preparing_transaction_can_be_rolled_back_without_feed_snapshots(self):
+        self.remote.asset_valid = False
+        with self.assertRaises(RuntimeError):
+            tx.publish(self.plan, self.path, self.remote)
+        tx.rollback(self.path, self.remote)
+        self.assertEqual(json.loads(self.path.read_text())['status'], 'rolled_back')
+        self.assertEqual(self.remote.values, {'one': b'old-one', 'two': b'old-two'})
+        self.assertIsNone(self.remote.lock)
     def test_missing_asset_during_resume_blocks_remaining_feed(self):
         self.remote.fail_repo = 'two'
         with self.assertRaises(ConnectionError): tx.publish(self.plan, self.path, self.remote)

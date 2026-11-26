@@ -77,6 +77,9 @@ final class DeveloperCenterModel: ObservableObject {
     @Published var logLines: [String] = []
     @Published var journals: [DevJournal] = []
     @Published var history: DevHistory?
+    @Published var lifecyclePlugins: [DevLifecyclePlugin] = []
+    @Published var lifecyclePreview: DevLifecyclePreview?
+    @Published var lifecycleError: String?
     @Published var installedTool: DevToolInstallation?
     @Published var availableTool: DevToolEntry?
     @Published var toolMessage: String?
@@ -131,6 +134,65 @@ final class DeveloperCenterModel: ObservableObject {
         await refreshJournals()
         await refreshHistory()
         await refreshDoctor()
+        await refreshLifecycle()
+    }
+
+    func refreshLifecycle() async {
+        guard let service = makeService() else { return }
+        do {
+            lifecyclePlugins = try await service.lifecyclePlugins()
+            lifecycleError = nil
+        } catch {
+            lifecycleError = error.localizedDescription
+        }
+    }
+
+    func previewLifecycle(_ plugin: DevLifecyclePlugin) async {
+        guard !busy, !hasPendingTransaction, let service = makeService() else { return }
+        busy = true
+        phase = .working("正在检查插件状态…")
+        error = nil
+        do {
+            let preview = try await service.lifecyclePreview(id: plugin.id, published: !plugin.published)
+            if preview.noop {
+                notice = "插件状态未变化。"
+                await refreshLifecycle()
+            } else {
+                lifecyclePreview = preview
+            }
+            phase = .idle
+        } catch let failure as DevFailure {
+            apply(failure: failure)
+        } catch {
+            apply(error: error)
+        }
+        busy = false
+    }
+
+    func confirmLifecycle(_ preview: DevLifecyclePreview) async {
+        guard !busy, !hasPendingTransaction, let service = makeService() else { return }
+        lifecyclePreview = nil
+        busy = true
+        phase = .working(preview.published ? "正在重新上架…" : "正在下架…")
+        stages = []
+        error = nil
+        lastJournal = nil
+        do {
+            let result = try await service.lifecycleSet(preview) { [weak self] event in
+                Task { @MainActor in self?.apply(event) }
+            }
+            lastJournal = result.journal
+            await refreshAll()
+            notice = preview.published ? "已重新上架 \(preview.name)" : "已下架 \(preview.name)"
+            phase = .idle
+        } catch let failure as DevFailure {
+            apply(failure: failure)
+            await refreshJournals()
+        } catch {
+            apply(error: error)
+            await refreshJournals()
+        }
+        busy = false
     }
 
     func refreshRecordsOnly() async {
@@ -185,7 +247,7 @@ final class DeveloperCenterModel: ObservableObject {
                 createdAt: meta["createdAt"] as? Int,
                 toolVersion: meta["toolVersion"] as? String,
                 resumable: status == "preparing" || status == "publishing",
-                rollbackable: status == "complete" || status == "publishing",
+                rollbackable: ["preparing", "publishing", "rolling_back", "complete"].contains(status),
                 repositories: repositories))
         }
         return result.sorted { ($0.createdAt ?? 0) > ($1.createdAt ?? 0) }
@@ -270,7 +332,7 @@ final class DeveloperCenterModel: ObservableObject {
         configuration.repositoryPath = url.path
         DeveloperDefaults.save(configuration)
         invalidateService()
-        Task { await refreshDoctor() }
+        Task { await refreshAll() }
     }
 
     func setToolPath(_ url: URL?) {

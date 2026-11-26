@@ -77,6 +77,9 @@ struct DeveloperCenterView: View {
         .sheet(item: $confirmingDelete) { journal in
             deleteSheet(journal)
         }
+        .sheet(item: $model.lifecyclePreview) { preview in
+            lifecycleConfirmation(preview)
+        }
     }
 
     // MARK: header and footer
@@ -484,6 +487,41 @@ struct DeveloperCenterView: View {
 
     private var management: some View {
         VStack(alignment: .leading, spacing: 16) {
+            Text("插件管理").font(Paper.font(12).weight(.medium)).foregroundStyle(Paper.secondary)
+            if let error = model.lifecycleError {
+                Text(error).font(Paper.font(12)).foregroundStyle(Paper.error)
+            } else if model.lifecyclePlugins.isEmpty {
+                Text("暂无已发布插件").font(Paper.font(12)).foregroundStyle(Paper.secondary)
+            } else {
+                ScrollView {
+                    VStack(spacing: 0) {
+                        ForEach(model.lifecyclePlugins) { plugin in
+                            HStack(spacing: 10) {
+                                Image(systemName: plugin.symbol).frame(width: 24).foregroundStyle(Paper.accent)
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text(plugin.name).font(Paper.font(13).weight(.medium))
+                                    Text("v\(plugin.version)").font(Paper.font(11).monospaced()).foregroundStyle(Paper.secondary)
+                                }
+                                Spacer()
+                                Text(plugin.published ? "已上架" : "已下架")
+                                    .font(Paper.font(12)).foregroundStyle(Paper.secondary)
+                                Button(plugin.published ? "下架…" : "重新上架…") {
+                                    Task { await model.previewLifecycle(plugin) }
+                                }
+                                .buttonStyle(PaperButtonStyle(compact: true))
+                                .disabled(model.busy || model.hasPendingTransaction)
+                            }
+                            .frame(minHeight: 52)
+                            PaperRule()
+                        }
+                    }.padding(.horizontal, 14)
+                }
+                .frame(maxHeight: 180)
+                .background(Paper.surface, in: RoundedRectangle(cornerRadius: 12))
+            }
+            if case .working(let message) = model.phase {
+                Text(message).font(Paper.font(12)).foregroundStyle(Paper.secondary)
+            }
             HStack {
                 Text("发布管理").font(Paper.font(12).weight(.medium)).foregroundStyle(Paper.secondary)
                 Spacer()
@@ -517,6 +555,23 @@ struct DeveloperCenterView: View {
                 .overlay { RoundedRectangle(cornerRadius: 12).strokeBorder(Paper.rule, lineWidth: 0.8) }
             }
         }
+    }
+
+    private func lifecycleConfirmation(_ preview: DevLifecyclePreview) -> some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text(preview.published ? "重新上架插件？" : "下架插件？")
+                .font(Paper.font(21).weight(.semibold))
+            Text("\(preview.name) · v\(preview.version)").font(Paper.font(13))
+            Text(preview.published ? "插件将重新出现在插件管理中，恢复安装和更新。" : "新用户将无法安装；已安装插件和用户数据会保留。")
+                .font(Paper.font(12)).foregroundStyle(Paper.secondary).fixedSize(horizontal: false, vertical: true)
+            HStack {
+                Spacer()
+                Button("取消") { model.lifecyclePreview = nil }.buttonStyle(PaperButtonStyle())
+                Button(preview.published ? "重新上架" : "下架") {
+                    Task { await model.confirmLifecycle(preview) }
+                }.buttonStyle(PaperButtonStyle(primary: true))
+            }
+        }.padding(24).frame(width: 440).background(Paper.background)
     }
 
     private func journalRow(_ journal: DevJournal) -> some View {
@@ -558,7 +613,8 @@ struct DeveloperCenterView: View {
 
     private func recordRow(_ record: DevRecord) -> some View {
         HStack(spacing: 10) {
-            Text(record.kind == "rollback" ? "回滚" : (record.kind == "resume" ? "恢复" : "发布"))
+            Text(record.kind == "rollback" ? "回滚" : record.kind == "resume" ? "恢复" :
+                 record.kind == "withdraw" ? "下架" : record.kind == "republish" ? "上架" : "发布")
                 .font(Paper.font(11)).foregroundStyle(Paper.secondary)
                 .frame(width: 32, alignment: .leading)
             Text(record.plugin ?? "").font(Paper.font(12))

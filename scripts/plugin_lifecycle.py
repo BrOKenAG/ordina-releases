@@ -1,5 +1,6 @@
 """Side-effect-free planning for plugin publication-state changes."""
 import copy
+import base64
 import hashlib
 import json
 import re
@@ -35,7 +36,8 @@ def plan(source, plugin_id, published):
         after['plugins'][plugin_id]['everPublished'] = True
     return {'id': plugin_id, 'repository': original['repository'],
             'version': original['version'], 'published': published,
-            'noop': original['published'] == published, 'after': after}
+            'noop': original['published'] == published, 'before': copy.deepcopy(source),
+            'after': after}
 
 
 def prepare_transaction(change, asset, transaction_id):
@@ -64,4 +66,61 @@ def prepare_transaction(change, asset, transaction_id):
                       'size': len(asset), 'sha256': metadata['sha256']},
             'feeds': {repo: GitHubLabMultiBackend.encode_files(files).decode('ascii')
                       for repo, files in sorted(feeds.items())},
-            'lifecycle': {'id': plugin_id, 'published': change['published']}}
+            'lifecycle': {'id': plugin_id, 'published': change['published'],
+                          'before': change['before']}}
+
+
+def verify_transaction(transaction, remote):
+    """Verify signed desired feeds and remote snapshots before a state change."""
+    from feed_signing import verify_envelope
+    action = transaction.get('lifecycle') or {}
+    change = plan(action.get('before'), action.get('id'), action.get('published'))
+    if change['noop']:
+        raise ValueError('插件状态未变化。')
+    plugin_id, repo = change['id'], change['repository']
+    main_repo = 'BrOKenAG/ordina-releases'
+    if set(transaction.get('feeds', {})) != {main_repo, repo}:
+        raise ValueError('事务仓库范围无效。')
+    metadata = change['before']['plugins'][plugin_id]
+    expected_asset = {'url': build_feeds.entry(plugin_id, metadata)['url'],
+                      'size': metadata['size'], 'sha256': metadata['sha256']}
+    if transaction.get('asset') != expected_asset:
+        raise ValueError('事务资产与原发布记录不一致。')
+    before = build_feeds.documents(change['before']['plugins'])
+    after = build_feeds.documents(change['after']['plugins'])
+
+    def documents(values, source):
+        registry, legacy, per_plugin = values
+        result = {main_repo: {'registry.json': registry,
+                              'plugins/manifest.json': legacy,
+                              'plugins/registry.source.json': source},
+                  repo: {'manifest-v2.json': per_plugin[plugin_id]}}
+        if source['plugins'][plugin_id].get('legacy'):
+            entry = legacy['plugins'].get(plugin_id)
+            result[repo]['manifest.json'] = {'format': 1,
+                                             'plugins': {plugin_id: entry} if entry else {}}
+        return result
+
+    old = documents(before, change['before'])
+    new = documents(after, change['after'])
+    heads = {}
+    for repository in (main_repo, repo):
+        desired = json.loads(transaction['feeds'][repository])
+        head, remote_bytes = remote.read(repository)
+        heads[repository] = head
+        current = json.loads(remote_bytes)
+        if set(desired) != set(new[repository]) or set(current) != set(old[repository]):
+            raise ValueError('事务文件范围无效。')
+        observed = {}
+        for path in desired:
+            desired_bytes = base64.b64decode(desired[path], validate=True)
+            current_bytes = base64.b64decode(current[path], validate=True)
+            decode = json.loads if path.endswith('registry.source.json') else verify_envelope
+            desired_doc = decode(desired_bytes)
+            current_doc = decode(current_bytes)
+            observed[path] = current_doc
+            if desired_doc != new[repository][path]:
+                raise ValueError('签名清单或远端状态与事务不一致。')
+        if observed not in (old[repository], new[repository]):
+            raise ValueError('远端快照已变化，停止事务。')
+    return heads

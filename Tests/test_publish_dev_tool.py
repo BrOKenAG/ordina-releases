@@ -31,14 +31,14 @@ class PublishDevToolTests(unittest.TestCase):
         self.assertEqual(plan['feedTargets'], ['dev-tool-manifest'])
         self.assertEqual(plan['feeds']['BrOKenAG/ordina-releases'],
                          ['dev-tool/manifest.json'])
-        self.assertEqual(plan['tag'], 'dev-tool-v1.0.0')
+        self.assertEqual(plan['tag'], 'dev-tool-v' + pdt.build_dev_tool.read_version())
 
     def test_rehearsal_writes_nothing(self):
         before = {
             path: path.read_bytes() if path.exists() else None
             for path in (ROOT / 'dev-tool' / 'manifest.json',
                          ROOT / 'dev-tool' / 'manifest.source.json',
-                         ROOT / 'dist' / 'dev-tool' / 'ordina-publisher-1.0.0.pyz')
+                         ROOT / 'dist' / 'dev-tool' / ('ordina-publisher-' + pdt.build_dev_tool.read_version() + '.pyz'))
         }
         journals = ROOT / '.transactions'
         existed = journals.exists()
@@ -53,7 +53,7 @@ class PublishDevToolTests(unittest.TestCase):
         result = run('--commands')
         self.assertEqual(result.returncode, 0, result.stderr)
         text = result.stdout
-        self.assertIn('gh release create dev-tool-v1.0.0', text)
+        self.assertIn('gh release create dev-tool-v' + pdt.build_dev_tool.read_version(), text)
         self.assertIn('--publish-manifest --execute', text)
         self.assertNotIn('git push', text)
         self.assertNotIn('gh api', text)

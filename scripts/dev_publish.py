@@ -40,17 +40,18 @@ import dev_credentials
 import dev_zip
 import durable_release
 import plugin_protocol as protocol
+import plugin_lifecycle
 import publish_plugin
 from release_transaction import LocalGateway, ReleaseError
 
 TOOL = 'ordina-publisher'
-TOOL_VERSION = '1.0.0'
+TOOL_VERSION = '1.1.0'
 PROTOCOL = 1
 MIN_CLIENT = '1.10.0'
 MAX_NOTES = 2000
 STAGES = ('preflight', 'asset', 'gate', 'feeds', 'push', 'postflight')
 FEATURES = ('zip-input', 'local-test', 'preview', 'publish', 'journal',
-            'resume', 'rollback', 'history', 'repository-setup', 'tool-update')
+            'resume', 'rollback', 'history', 'repository-setup', 'tool-update', 'plugin-lifecycle')
 
 
 class Failure(Exception):
@@ -434,6 +435,14 @@ def authorize_repositories(options, repositories):
         production_authorize(options, repository)
 
 
+def authorize_direct_plugin_write(repositories):
+    """Guard legacy/direct Python entry points with the same production checks."""
+    if lab_enabled():
+        raise Failure('backend.lab', '隔离授权不能用于生产写入。')
+    from types import SimpleNamespace
+    authorize_repositories(SimpleNamespace(credentials=None), repositories)
+
+
 def repository_state(slug, kind):
     if kind == 'lab':
         root = lab_root()
@@ -659,7 +668,7 @@ def journal_summary(path):
                                 'rolledBack': item.get('rollback_head')}
                          for repo, item in repositories.items()},
         'resumable': document.get('status') in ('preparing', 'publishing'),
-        'rollbackable': document.get('status') in ('complete', 'publishing'),
+        'rollbackable': document.get('status') in ('preparing', 'publishing', 'rolling_back', 'complete'),
     }
 
 
@@ -989,6 +998,124 @@ def command_history(options):
     ok({'records': records, 'journals': journals})
 
 
+def lifecycle_source(options, root):
+    if options.backend == 'lab':
+        return json.loads((root / 'plugins' / 'registry.source.json').read_text(encoding='utf-8'))
+    try:
+        result = subprocess.run(['gh', 'api', 'repos/BrOKenAG/ordina-releases/contents/plugins/registry.source.json'],
+                                capture_output=True, text=True, timeout=20, check=True)
+        item = json.loads(result.stdout)
+        return json.loads(base64.b64decode(item['content'], validate=False))
+    except (OSError, ValueError, KeyError, subprocess.SubprocessError) as error:
+        raise Failure('lifecycle.source', '无法读取官方插件目录。') from error
+
+
+def lifecycle_preview(options, root):
+    if options.published not in ('yes', 'no'):
+        raise Failure('lifecycle.action', '请选择下架或重新上架。')
+    source = lifecycle_source(options, root)
+    try:
+        change = plugin_lifecycle.plan(source, options.plugin_id, options.published == 'yes')
+    except (ValueError, TypeError) as error:
+        raise Failure('lifecycle.invalid', str(error)) from error
+    credential(options, change['repository'])
+    if options.backend == 'production':
+        production_authorize(options, change['repository'])
+        if not durable_release.lab_report_valid():
+            raise Failure('publish.labreport', '缺少有效的隔离环境验证报告。')
+    fingerprint = hashlib.sha256(json.dumps({'before': source, 'id': change['id'],
+                                             'published': change['published']},
+                                            sort_keys=True, separators=(',', ':')).encode()).hexdigest()
+    meta = source['plugins'][change['id']]
+    return {'id': change['id'], 'name': meta.get('name') or change['id'],
+            'symbol': meta.get('symbol') or 'puzzlepiece.extension', 'version': change['version'],
+            'published': change['published'], 'noop': change['noop'], 'fingerprint': fingerprint}
+
+
+def command_lifecycle_list(options):
+    root = environment_repository(required=True)
+    source = lifecycle_source(options, root)
+    result = []
+    for plugin_id, meta in sorted(source.get('plugins', {}).items()):
+        if meta.get('published') is not True and meta.get('everPublished') is not True:
+            continue
+        result.append({'id': plugin_id, 'name': meta.get('name') or plugin_id,
+                       'symbol': meta.get('symbol') or 'puzzlepiece.extension',
+                       'version': meta.get('version') or '', 'published': meta.get('published') is True})
+    ok({'plugins': result})
+
+
+def command_lifecycle_preview(options):
+    root = environment_repository(required=True)
+    ok(lifecycle_preview(options, root))
+
+
+def command_lifecycle_set(options):
+    if not options.execute or not options.expect_fingerprint:
+        raise Failure('lifecycle.confirm', '请先预览并明确确认操作。')
+    root = environment_repository(required=True)
+    preview = lifecycle_preview(options, root)
+    if preview['fingerprint'] != options.expect_fingerprint:
+        raise Failure('preview.stale', '插件目录已变化，请重新预览。')
+    if preview['noop']:
+        ok({'journal': '', 'status': 'unchanged', 'plugin': preview['id'], 'version': preview['version']})
+        return
+    directory = journal_directory(root, options.journal_dir)
+    if any(item.get('status') not in ('complete', 'rolled_back') for item in all_journals(directory)):
+        raise Failure('journal.pending', '存在未完成事务，请先恢复或回滚。')
+    source = lifecycle_source(options, root)
+    change = plugin_lifecycle.plan(source, options.plugin_id, options.published == 'yes')
+    # The preview fingerprint is rechecked after fetching the source for use.
+    current = hashlib.sha256(json.dumps({'before': source, 'id': change['id'],
+                                        'published': change['published']}, sort_keys=True,
+                                       separators=(',', ':')).encode()).hexdigest()
+    if current != options.expect_fingerprint:
+        raise Failure('preview.stale', '插件目录已变化，请重新预览。')
+    target = source['plugins'][change['id']]
+    url = build_feeds.entry(change['id'], target)['url']
+    if options.backend == 'lab':
+        import dev_lab_backend
+        raw_backend = dev_lab_backend.LabBackend(lab_root())
+        asset = raw_backend.asset_path(url).read_bytes()
+    else:
+        from github_production_backend import ProductionBackend
+        asset = ProductionBackend._fetch_public(url)
+    tid = 'lifecycle-' + change['id'] + '-' + secrets.token_hex(10)
+    durable = plugin_lifecycle.prepare_transaction(change, asset, tid)
+    paths = {repo: sorted(json.loads(raw)) for repo, raw in durable['feeds'].items()}
+    if options.backend == 'lab':
+        backend = raw_backend
+    else:
+        tag = f'plugin-{change["id"]}-v{change["version"]}'
+        backend = ProductionBackend('BrOKenAG/ordina-releases', change['repository'], tag,
+                                    target['asset'], paths, set(paths))
+        backend = AuthorizedBackend(backend, lambda: authorize_repositories(options, set(paths)))
+    durable['expected_heads'] = plugin_lifecycle.verify_transaction(durable, backend)
+    directory.mkdir(parents=True, exist_ok=True)
+    journal = directory / (tid + '.json')
+    meta = {'format': 1, 'plugin': change['id'], 'name': preview['name'],
+            'version': change['version'], 'repository': change['repository'],
+            'tag': f'plugin-{change["id"]}-v{change["version"]}',
+            'notes': '重新上架' if change['published'] else '下架',
+            'createdAt': int(time.time()), 'toolVersion': TOOL_VERSION}
+    meta_path(journal).write_text(json.dumps(meta, ensure_ascii=False), encoding='utf-8')
+    try:
+        import durable_transaction
+        event('stage', stage='feeds', state='running', index=1, total=1)
+        durable_transaction.publish(durable, journal, backend)
+        event('stage', stage='feeds', state='ok', index=1, total=1)
+    except Failure as error:
+        raise Failure(error.code, str(error), stage='feeds', journal=journal) from error
+    except (ValueError, OSError, RuntimeError) as error:
+        raise Failure('lifecycle.failed', str(error), stage='feeds', journal=journal) from error
+    sync_worktree(root)
+    append_record(records_path(directory, options.records), {
+        'kind': 'republish' if change['published'] else 'withdraw', 'plugin': change['id'],
+        'version': change['version'], 'journal': str(journal), 'status': 'complete'})
+    ok({'journal': str(journal), 'status': 'complete', 'plugin': change['id'],
+        'version': change['version'], 'published': change['published']})
+
+
 def command_credential_status(options):
     ok(dev_credentials.status(options.credentials or env('ORDINA_DEV_CREDENTIALS')))
 
@@ -1024,6 +1151,9 @@ COMMANDS = {
     'resume': command_resume,
     'rollback': command_rollback,
     'history': command_history,
+    'lifecycle-list': command_lifecycle_list,
+    'lifecycle-preview': command_lifecycle_preview,
+    'lifecycle-set': command_lifecycle_set,
 }
 
 
@@ -1033,6 +1163,7 @@ def main():
     parser.add_argument('command', choices=sorted(COMMANDS))
     parser.add_argument('--zip', help='ZIP 安装包路径')
     parser.add_argument('--plugin-id', help='期望的插件标识（脚本包必填）')
+    parser.add_argument('--published', choices=('yes', 'no'))
     parser.add_argument('--notes', help='更新说明')
     parser.add_argument('--repo', help='ordina 发布仓库路径')
     parser.add_argument('--journal-dir', help='事务目录')
@@ -1061,7 +1192,7 @@ def main():
               'error': {'code': 'backend.lab',
                         'message': '隔离后端只允许在 ORDINA_DEV_LAB=1 时使用。'}})
         sys.exit(1)
-    if lab_enabled() and options.backend == 'production' and options.command in ('publish', 'resume', 'rollback'):
+    if lab_enabled() and options.backend == 'production' and options.command in ('publish', 'resume', 'rollback', 'lifecycle-set'):
         emit({'type': 'result', 'ok': False,
               'error': {'code': 'backend.lab',
                         'message': '隔离授权不能用于生产发布。'}})

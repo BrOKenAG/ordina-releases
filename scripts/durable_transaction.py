@@ -137,6 +137,12 @@ def rollback(path, remote):
             raise ValueError('事务记录缺少有效的发布计划')
         token = journal['token']
         records = journal['repositories']
+        if journal.get('status') == 'preparing' and not records:
+            remote.acquire(token)
+            journal['status'] = 'rolled_back'
+            _save(path, journal)
+            remote.release(token)
+            return
         if set(records) != set(plan.get('feeds', {})):
             raise ValueError('事务快照不完整')
         verify_snapshot = getattr(remote, 'verify_rollback', None)

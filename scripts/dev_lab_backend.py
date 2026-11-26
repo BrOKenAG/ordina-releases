@@ -147,6 +147,10 @@ class LabBackend:
         data = path.read_bytes()
         if len(data) != asset['size'] or hashlib.sha256(data).hexdigest() != asset['sha256']:
             _fail('public asset hash mismatch')
+        if 'lifecycle' in plan:
+            import plugin_lifecycle
+            plugin_lifecycle.verify_transaction(plan, self)
+            return
         references = []
         for repo, raw in plan['feeds'].items():
             self._check(repo)
