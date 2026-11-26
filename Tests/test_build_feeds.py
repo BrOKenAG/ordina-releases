@@ -106,7 +106,15 @@ class FeedDerivationTests(unittest.TestCase):
         self.assertIn('minutes', registry['withdrawn'])
         self.assertNotIn('yueliu', registry['withdrawn'])
         self.assertNotIn('minutes', legacy['plugins'])
-        self.assertNotIn('minutes', feeds)
+        self.assertEqual(feeds['minutes']['plugins'], {})
+
+    def test_withdrawal_empties_both_signed_plugin_feeds(self):
+        plugins = copy.deepcopy(self.plugins)
+        plugins['minutes'].update(published=False, everPublished=True)
+        with patch.object(bf, 'envelope_bytes', return_value=b'signed'):
+            generated = bf.generate(plugins)
+        self.assertEqual(generated['plugin:minutes'][0]['plugins'], {})
+        self.assertEqual(generated['compat-plugin:minutes'][0]['plugins'], {})
 
 
 if __name__ == '__main__':

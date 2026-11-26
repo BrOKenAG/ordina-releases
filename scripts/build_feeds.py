@@ -132,6 +132,8 @@ def documents(plugins):
     legacy = {'format': 1, 'plugins': legacy_entries}
     per_plugin = {name: {'format': 1, 'plugins': {name: manifest_entry(name, live[name])}}
                   for name in live}
+    for name in withdrawn:
+        per_plugin[name] = {'format': 1, 'plugins': {}}
     return registry, legacy, per_plugin
 
 
@@ -146,6 +148,9 @@ def generate(plugins, tool=None):
         outputs['plugin:' + name] = (document, envelope_bytes(document, tool))
         if name in legacy['plugins']:
             compatibility = {'format': 1, 'plugins': {name: legacy['plugins'][name]}}
+            outputs['compat-plugin:' + name] = (compatibility, envelope_bytes(compatibility, tool))
+        elif name in registry.get('withdrawn', []) and plugins[name].get('legacy'):
+            compatibility = {'format': 1, 'plugins': {}}
             outputs['compat-plugin:' + name] = (compatibility, envelope_bytes(compatibility, tool))
     return outputs
 

@@ -10,9 +10,12 @@ sys.path.insert(0, str(ROOT / 'scripts'))
 import build_feeds
 
 class HistoricalClientTests(unittest.TestCase):
-    def check_client(self, commit, names):
+    def check_client(self, commit, names, withdrawn=None):
         source = subprocess.check_output(['git', 'show', commit + ':Ordina/PluginUpdates.swift'], cwd=ROOT)
-        _, legacy, _ = build_feeds.documents(build_feeds.load_source())
+        plugins = build_feeds.load_source()
+        if withdrawn:
+            plugins[withdrawn].update(published=False, everPublished=True)
+        _, legacy, _ = build_feeds.documents(plugins)
         harness = r'''
 import Foundation
 import CryptoKit
@@ -26,13 +29,15 @@ enum OptionalPlugin: String { case minutes, multicam, yueliu; var id: String { r
   for plugin in PLUGINS {
    _ = try PluginUpdates.verifiedEntry(envelope, plugin: plugin, publicKey: key.publicKey.rawRepresentation)
   }
+  WITHDRAWN
  }
 }
 '''
         with tempfile.TemporaryDirectory(prefix='ordina-history-') as temp:
             path = Path(temp)
             (path/'Old.swift').write_bytes(source)
-            (path/'Check.swift').write_text(harness.replace('PLUGINS', '[' + ', '.join('OptionalPlugin.' + n for n in names) + ']'))
+            rejection = ('do { _ = try PluginUpdates.verifiedEntry(envelope, plugin: .%s, publicKey: key.publicKey.rawRepresentation); fatalError("withdrawn accepted") } catch { }' % withdrawn) if withdrawn else ''
+            (path/'Check.swift').write_text(harness.replace('PLUGINS', '[' + ', '.join('OptionalPlugin.' + n for n in names) + ']').replace('WITHDRAWN', rejection))
             (path/'payload.json').write_text(json.dumps(legacy))
             subprocess.run(['/usr/bin/xcrun','swiftc',str(path/'Old.swift'),str(path/'Check.swift'),'-o',str(path/'check')],check=True,cwd=ROOT)
             subprocess.run([str(path/'check'),str(path/'payload.json')],check=True,cwd=ROOT)
@@ -45,3 +50,6 @@ enum OptionalPlugin: String { case minutes, multicam, yueliu; var id: String { r
 
     def test_195(self):
         self.check_client('679c940', ['minutes', 'multicam'])
+
+    def test_195_rejects_withdrawn_entry_in_signed_compatibility_feed(self):
+        self.check_client('679c940', ['multicam'], withdrawn='minutes')
