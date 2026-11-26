@@ -1,5 +1,6 @@
 import Foundation
 import Combine
+import LocalAuthentication
 
 @MainActor
 final class DeveloperAuthentication: ObservableObject {
@@ -10,6 +11,32 @@ final class DeveloperAuthentication: ObservableObject {
     @Published var setupURI: String?
     private var pending: Data?
     private var session = DeveloperAuthState()
+    #if ORDINA_LAB
+    private var recoveryCheck: (() async throws -> Void)?
+    init(recoveryCheck: (() async throws -> Void)? = nil) { self.recoveryCheck = recoveryCheck }
+    #else
+    init() {}
+    #endif
+
+    private func verifyRecovery() async throws {
+        #if ORDINA_LAB
+        if let recoveryCheck { try await recoveryCheck(); return }
+        #endif
+        let context = LAContext()
+        var evaluationError: NSError?
+        guard context.canEvaluatePolicy(.deviceOwnerAuthentication, error: &evaluationError) else {
+            throw DevBridgeError.response("无法验证本机身份，请检查 macOS 登录设置。")
+        }
+        do {
+            guard try await context.evaluatePolicy(.deviceOwnerAuthentication,
+                    localizedReason: "验证身份以重新配置开发者验证器") else {
+                throw DevBridgeError.response("本机身份验证未完成。")
+            }
+        } catch {
+            throw DevBridgeError.response("本机身份验证未完成。")
+        }
+    }
+
     private var store: DeveloperAuthKeychain {
         let service = (Bundle.main.bundleIdentifier ?? "com.ordina.app") + ".developer-totp"
         #if DEBUG || ORDINA_LAB
@@ -50,6 +77,7 @@ final class DeveloperAuthentication: ObservableObject {
         busy = true; error = nil
         defer { busy = false }
         do {
+            if try store.read() != nil { try await verifyRecovery() }
             try await authorize(configuration)
             let secret = try DeveloperAuthKeychain.generateSecret()
             pending = secret
@@ -107,6 +135,7 @@ final class DeveloperAuthentication: ObservableObject {
         busy = true; error = nil
         defer { busy = false }
         do {
+            try await verifyRecovery()
             try await authorize(configuration)
             try store.remove()
             bound = false; lock()

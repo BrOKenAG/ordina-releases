@@ -7,7 +7,7 @@ struct DeveloperAuthenticationView: View {
     let configure: () -> Void
     @State private var code = ""
     @FocusState private var focused: Bool
-    private let accent = Paper.accent
+    private let accent = OrdinaTokens.focus
 
     var body: some View {
         VStack(spacing: 0) {
