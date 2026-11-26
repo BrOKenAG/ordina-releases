@@ -114,6 +114,8 @@ final class WorkspaceState: ObservableObject {
 struct WorkspaceView: View {
     @State private var showingProjects = false
     @State private var settings = false
+    @State private var showingPlugins = false
+    @State private var showProjectsAfterSettings = false
     @State private var checkUpdatesAfterSettings = false
     @State private var search = ""
     @State private var year = "全部"
@@ -141,13 +143,11 @@ struct WorkspaceView: View {
         .foregroundStyle(OrdinaTokens.ink)
         .overlay(alignment: .topTrailing) {
             HStack(spacing: 4) {
-                Button {
-                    showingProjects = true
-                    workspace.refreshProjects()
-                } label: {
-                    DoodleIcon(.folder).frame(width: 24, height: 24)
+                Button { showingPlugins = true } label: {
+                    Image(systemName: "puzzlepiece.extension").font(.system(size: 23))
+                        .frame(width: 24, height: 24)
                 }
-                .buttonStyle(PaperQuietButton()).help("全部项目").accessibilityLabel("全部项目")
+                .buttonStyle(PaperQuietButton()).help("插件管理").accessibilityLabel("插件管理")
                 Button { settings = true } label: {
                     Image(systemName: "gearshape").font(.system(size: 23))
                 }
@@ -157,12 +157,19 @@ struct WorkspaceView: View {
         }
         .animation(reduceMotion ? nil : .easeInOut(duration: 0.18), value: showingProjects)
         .sheet(isPresented: $settings, onDismiss: {
+            if showProjectsAfterSettings {
+                showProjectsAfterSettings = false
+                showingProjects = true
+                workspace.refreshProjects()
+            }
             guard checkUpdatesAfterSettings else { return }
             checkUpdatesAfterSettings = false
             AppUpdater.shared.checkForUpdates()
         }) {
-            WorkspaceSettingsView(requestUpdateCheck: { checkUpdatesAfterSettings = true })
+            WorkspaceSettingsView(requestUpdateCheck: { checkUpdatesAfterSettings = true },
+                                  requestProjects: { showProjectsAfterSettings = true })
         }
+        .sheet(isPresented: $showingPlugins) { ResolvePluginsPage() }
         .onReceive(NotificationCenter.default.publisher(for: .ordinaOpenSettings)) { _ in settings = true }
         .onReceive(NotificationCenter.default.publisher(for: .ordinaFocusCreation)) { _ in showingProjects = false }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
@@ -235,6 +242,7 @@ struct WorkspaceView: View {
 
 struct WorkspaceSettingsView: View {
     var requestUpdateCheck: () -> Void = {}
+    var requestProjects: () -> Void = {}
     @ObservedObject private var updater = AppUpdater.shared
     @ObservedObject private var workspace = WorkspaceState.shared
     @ObservedObject private var templates = TemplateManager.shared
@@ -270,6 +278,11 @@ struct WorkspaceSettingsView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
                     settingsGroup("项目默认值") {
+                        settingRow("全部项目", action: "打开…") {
+                            requestProjects()
+                            dismiss()
+                        }
+                        PaperRule()
                         HStack(spacing: 12) {
                             Text("默认保存位置").fixedSize()
                             Spacer(minLength: 12)
