@@ -55,6 +55,22 @@ class DurableTests(unittest.TestCase):
         self.assertEqual(self.remote.values['two'], b'new-two')
         self.assertIsNone(self.remote.lock)
         self.assertEqual(json.loads(self.path.read_text())['status'],'complete')
+
+    def test_rollback_checks_original_snapshot_before_any_remote_mutation(self):
+        import base64
+        tx.publish(self.plan, self.path, self.remote)
+        journal = json.loads(self.path.read_text())
+        journal['repositories']['one']['before'] = base64.b64encode(b'forged').decode()
+        self.path.write_text(json.dumps(journal))
+        def verify(repo, head, data):
+            if data != {'one': b'old-one', 'two': b'old-two'}[repo]:
+                raise ValueError('snapshot mismatch')
+        self.remote.verify_rollback = verify
+        before = dict(self.remote.values)
+        with self.assertRaises(ValueError):
+            tx.rollback(self.path, self.remote)
+        self.assertEqual(self.remote.values, before)
+        self.assertIsNone(self.remote.lock)
     def test_resume_reads_exact_persisted_plan(self):
         self.remote.fail_repo = 'two'
         with self.assertRaises(ConnectionError): tx.publish(self.plan, self.path, self.remote)

@@ -5,6 +5,17 @@ sys.path.insert(0,str(ROOT/'scripts'))
 from github_production_backend import ProductionBackend
 
 class ProductionBackendTests(unittest.TestCase):
+ def test_rollback_snapshot_is_verified_against_git_commit(self):
+  from unittest.mock import patch
+  import base64
+  repo='BrOKenAG/ordina-releases'
+  backend=ProductionBackend(repo,repo,'v1','a.json',{repo:['registry.json']},{repo})
+  head='a'*40
+  original=backend.encode_files({'registry.json':b'original'})
+  with patch('github_lab_backend.api',return_value={'content':base64.b64encode(b'original').decode()}):
+   backend.verify_rollback(repo,head,original)
+   with self.assertRaises(ValueError):
+    backend.verify_rollback(repo,head,backend.encode_files({'registry.json':b'forged'}))
  def test_only_explicit_ordina_repositories_allowed(self):
   valid={'BrOKenAG/ordina-releases','BrOKenAG/ordina-plugin-minutes'}
   self.assertTrue(ProductionBackend.valid_allowlist(valid))

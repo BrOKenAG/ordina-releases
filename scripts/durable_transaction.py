@@ -132,11 +132,20 @@ def resume(path, remote):
 def rollback(path, remote):
     with _local_lock(path):
         journal = json.loads(Path(path).read_text(encoding='utf-8'))
+        plan = journal.get('plan')
+        if not isinstance(plan, dict) or journal.get('plan_hash') != _digest(plan):
+            raise ValueError('事务记录缺少有效的发布计划')
         token = journal['token']
+        records = journal['repositories']
+        if set(records) != set(plan.get('feeds', {})):
+            raise ValueError('事务快照不完整')
+        verify_snapshot = getattr(remote, 'verify_rollback', None)
+        if verify_snapshot is not None:
+            for repo, record in records.items():
+                verify_snapshot(repo, record['before_head'], _decode(record['before']))
         remote.acquire(token)
         # Validate all heads before changing any. A matching transaction-marked
         # rollback commit recovers a lost response without trusting content alone.
-        records = journal['repositories']
         for repo, record in records.items():
             head, data = remote.read(repo)
             if record.get('rollback_head') is not None:

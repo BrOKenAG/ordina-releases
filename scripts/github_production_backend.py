@@ -77,6 +77,20 @@ class ProductionBackend(GitHubLabMultiBackend):
         if repo not in self.allowed:
             raise ValueError('repository is not explicitly authorized')
 
+    def verify_rollback(self, repo, head, data):
+        """Compare the journal's old bytes against the immutable Git commit."""
+        from github_lab_backend import api
+        self._check(repo)
+        if not isinstance(head, str) or not re.fullmatch(r'[0-9a-f]{40}', head):
+            raise ValueError('事务原始提交无效')
+        files = {}
+        for path in self.paths[repo]:
+            obj = api('GET', f'repos/{repo}/contents/{quote(path, safe="/")}?ref={head}',
+                      allow_missing=True)
+            files[path] = base64.b64decode(obj['content']) if obj is not None else None
+        if self.encode_files(files) != data:
+            raise ValueError('事务原始快照与 Git 提交不符，拒绝回滚')
+
     @staticmethod
     def _fetch_public(url):
         with tempfile.TemporaryDirectory(prefix='ordina-public-check-') as tmp:
