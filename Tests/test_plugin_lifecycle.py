@@ -1,4 +1,6 @@
 import copy
+import hashlib
+import json
 import sys
 import unittest
 from pathlib import Path
@@ -42,6 +44,21 @@ class LifecyclePlanTests(unittest.TestCase):
             plugin_lifecycle.plan(self.source, 'yueliu', True)
         with self.assertRaises(ValueError):
             plugin_lifecycle.plan(self.source, 'missing', False)
+
+    def test_durable_plan_preserves_release_asset_and_signed_feeds(self):
+        from unittest.mock import patch
+        asset = b'previous release asset'
+        self.source['plugins']['minutes']['sha256'] = hashlib.sha256(asset).hexdigest()
+        self.source['plugins']['minutes']['size'] = len(asset)
+        change = plugin_lifecycle.plan(self.source, 'minutes', False)
+        with patch('build_feeds.envelope_bytes', side_effect=lambda doc, tool=None: json.dumps(doc).encode()):
+            durable = plugin_lifecycle.prepare_transaction(change, asset, 'test-transaction')
+        self.assertEqual(durable['asset']['sha256'], hashlib.sha256(asset).hexdigest())
+        self.assertEqual(durable['lifecycle'], {'id': 'minutes', 'published': False})
+        self.assertEqual(set(durable['feeds']), {'BrOKenAG/ordina-releases',
+                                                 'BrOKenAG/ordina-plugin-minutes'})
+        with self.assertRaises(ValueError):
+            plugin_lifecycle.prepare_transaction(change, b'wrong', 'test-transaction')
 
 
 if __name__ == '__main__':

@@ -1,7 +1,11 @@
 """Side-effect-free planning for plugin publication-state changes."""
 import copy
+import hashlib
+import json
 import re
 
+import build_feeds
+from github_lab_backend import GitHubLabMultiBackend
 import plugin_protocol
 
 
@@ -32,3 +36,32 @@ def plan(source, plugin_id, published):
     return {'id': plugin_id, 'repository': original['repository'],
             'version': original['version'], 'published': published,
             'noop': original['published'] == published, 'after': after}
+
+
+def prepare_transaction(change, asset, transaction_id):
+    """Build exact signed feed bytes for the existing durable transaction engine."""
+    if change['noop']:
+        raise ValueError('插件状态未变化。')
+    if not re.fullmatch(r'[A-Za-z0-9_-]{1,80}', transaction_id or ''):
+        raise ValueError('事务标识无效。')
+    plugin_id = change['id']
+    source = change['after']
+    metadata = source['plugins'][plugin_id]
+    if not isinstance(asset, bytes) or len(asset) != metadata['size'] or \
+            hashlib.sha256(asset).hexdigest() != metadata['sha256']:
+        raise ValueError('线上插件资产与记录不一致。')
+    generated = build_feeds.generate(source['plugins'])
+    target = {'manifest-v2.json': generated['plugin:' + plugin_id][1]}
+    if 'compat-plugin:' + plugin_id in generated:
+        target['manifest.json'] = generated['compat-plugin:' + plugin_id][1]
+    source_bytes = (json.dumps(source, ensure_ascii=False, indent=2) + '\n').encode()
+    main = {'registry.json': generated['registry'][1],
+            'plugins/manifest.json': generated['legacy'][1],
+            'plugins/registry.source.json': source_bytes}
+    feeds = {'BrOKenAG/ordina-releases': main, change['repository']: target}
+    return {'id': transaction_id,
+            'asset': {'url': build_feeds.entry(plugin_id, metadata)['url'],
+                      'size': len(asset), 'sha256': metadata['sha256']},
+            'feeds': {repo: GitHubLabMultiBackend.encode_files(files).decode('ascii')
+                      for repo, files in sorted(feeds.items())},
+            'lifecycle': {'id': plugin_id, 'published': change['published']}}
