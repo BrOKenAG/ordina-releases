@@ -69,6 +69,34 @@ class ProductionBackendTests(unittest.TestCase):
   with patch.object(backend,'read',return_value=('head',old)), patch('feed_signing.verify_envelope',side_effect=[{'format':2,'plugins':{}},{'format':2,'plugins':{'extra':{}}}]):
    with self.assertRaises(ValueError):backend.validate_transitions({'feeds':{repo:new}})
 
+ def test_plugin_update_registry_is_bound_to_signed_manifest_and_asset(self):
+  import base64,copy,json
+  from unittest.mock import patch
+  import build_feeds
+  main='BrOKenAG/ordina-releases'; plugin='BrOKenAG/ordina-plugin-minutes'
+  source=json.loads((ROOT/'plugins/registry.source.json').read_text())
+  registry,_,manifests=build_feeds.documents(source['plugins'])
+  old=copy.deepcopy(registry)
+  old['plugins']['minutes']['version']='0.2.0'
+  entry=manifests['minutes']['plugins']['minutes']
+  plan={'asset':{'url':entry['url'],'sha256':entry['sha256'],'size':entry['size']},
+        'feeds':{plugin:json.dumps({'manifest-v2.json':base64.b64encode(json.dumps(manifests['minutes']).encode()).decode()})}}
+  desired={'plugins/registry.source.json':base64.b64encode(json.dumps(source).encode()).decode()}
+  backend=ProductionBackend(main,plugin,'v1','minutes.json',{main:['registry.json']},{main,plugin})
+  with patch('feed_signing.verify_envelope',side_effect=lambda raw:json.loads(raw)):
+   backend._validate_registry_transition(old,registry,desired,plan)
+   bad=copy.deepcopy(registry);bad['plugins']['multicam']['repository']='BrOKenAG/ordina-plugin-evil'
+   with self.assertRaises(ValueError):backend._validate_registry_transition(old,bad,desired,plan)
+   bad=copy.deepcopy(plan);bad['asset']['sha256']='0'*64
+   with self.assertRaises(ValueError):backend._validate_registry_transition(old,registry,desired,bad)
+   bad=copy.deepcopy(old);bad['plugins']['minutes']['version']='99.0.0'
+   with self.assertRaises(ValueError):backend._validate_registry_transition(bad,registry,desired,plan)
+   bad=copy.deepcopy(plan);bad['feeds'][plugin]=json.dumps({'manifest-v2.json':base64.b64encode(b'{}').decode()})
+   with self.assertRaises(ValueError):backend._validate_registry_transition(old,registry,desired,bad)
+  with patch('feed_signing.verify_envelope',side_effect=ValueError('invalid signature')):
+   with self.assertRaisesRegex(ValueError,'invalid signature'):
+    backend._validate_registry_transition(old,registry,desired,plan)
+
  def test_pages_url_must_remain_on_expected_projects(self):
   allowed={'BrOKenAG/ordina-releases','BrOKenAG/ordina-plugin-minutes'}
   self.assertTrue(ProductionBackend.valid_pages_url('https://brokenag.github.io/ordina-plugin-minutes/manifest-v2.json',allowed))

@@ -2,28 +2,32 @@
   "format": 1,
   "passed": false,
   "productionToolVersion": null,
-  "candidateToolVersion": "1.6.0",
+  "candidateToolVersion": "1.8.0",
   "checks": {
     "declared_version": "pass",
     "manifest_version": "pass",
-    "signed_manifest": "fail: 签名清单内容与 manifest.source.json 不一致",
+    "signed_manifest": "pass",
     "archive_version": "pass",
     "no_secret_material": "pass",
     "release_commands": "pass",
-    "acceptance_reports": "pass"
+    "acceptance_reports": "fail: {'format': 1, 'passed': True, 'clientVersion': '1.10.0', 'compiledOnce': True, 'harnessSha256': '2854133366762bfeb7cdc2081886d4e9d8a0a44bc034961a321ede861941010c', 'productionToolVersion': None, 'candidateToolVersion': '1.6.0', 'labToolVersions': ['1.0.0', '1.1.0'], 'activeToolVersionAtEnd': '1.0.0', 'toolProtocol': 1, 'trustChain': 'isolated-lab-key', 'productionSigningKeyUsed': False, 'checks': {'tool_absent': 'pass', 'tool_manifest': 'pass', 'tool_install': 'pass', 'tool_integrity': 'pass', 'inspect_new': 'pass', 'local_test': 'pass', 'local_uninstall': 'pass', 'preview': 'pass', 'preview_stale': 'pass', 'malicious_zip': 'pass', 'zip_bomb': 'pass', 'publish_new': 'pass', 'client_discovers_new_plugin': 'pass', 'lifecycle_toggle': 'pass', 'lifecycle_resume': 'pass', 'lifecycle_rollback': 'pass', 'lifecycle_unauthorized': 'pass', 'publish_update': 'pass', 'interrupted_publish': 'pass', 'concurrent_blocked': 'pass', 'pending_blocks_tool_update': 'pass', 'resume_publish': 'pass', 'tool_update': 'pass', 'publish_after_tool_update': 'pass', 'rollback_release': 'pass', 'tool_rollback': 'pass', 'unsigned_credential': 'pass', 'wrong_scope': 'pass', 'version_downgrade': 'pass', 'enospc_consistency': 'pass', 'records_preserved': 'pass'}, 'details': {'tool_absent': {'installed': None}, 'tool_manifest': {'versions': ['1.0.0', '1.1.0']}, 'tool_install': {'installed': '1.0.0'}, 'tool_integrity': {'integrity': True, 'protocol': 1}, 'inspect_new': {'action': 'new', 'files': 4}, 'local_test': {'installed': '1.0.0', 'registryUntouched': True}, 'local_uninstall': {'uninstalled': True}, 'preview': {'fingerprint': '7c045ae3fc02', 'checks': 6}, 'preview_stale': {'code': 'preview.stale'}, 'malicious_zip': {'code': 'package.entry'}, 'zip_bomb': {'code': 'package.bomb'}, 'publish_new': {'journal': 'plugin-demo-lab-notes-v1-0-0-13c39d4be818d926d58c.json', 'stages': 6}, 'client_discovers_new_plugin': {'discovered': True, 'installed': '1.0.0', 'uninstalled': True}, 'lifecycle_toggle': {'withdrawn': True, 'republished': True}, 'lifecycle_resume': {'resumed': True}, 'lifecycle_rollback': {'rolledBack': True}, 'lifecycle_unauthorized': {'unchanged': True}, 'publish_update': {'previous': '1.0.0', 'version': '1.1.0'}, 'interrupted_publish': {'status': 'publishing', 'journal': 'plugin-demo-lab-notes-v1-2-0-2d015b25e64c1c11f0fc.json'}, 'concurrent_blocked': {'code': 'publish.failed', 'blocked': True}, 'pending_blocks_tool_update': {'blocked': True}, 'resume_publish': {'status': 'complete', 'version': '1.2.0'}, 'tool_update': {'from': '1.0.0', 'to': '1.1.0', 'journals': 8}, 'publish_after_tool_update': {'version': '1.3.0'}, 'rollback_release': {'status': 'rolled_back', 'registryVersion': '1.2.0'}, 'tool_rollback': {'installed': '1.0.0'}, 'unsigned_credential': {'code': 'auth.signature'}, 'wrong_scope': {'code': 'auth.scope'}, 'version_downgrade': {'action': 'downgrade'}, 'enospc_consistency': {'assetStage': 'asset', 'feedStage': 'feeds', 'resumed': True, 'duplicateRecords': 0}, 'records_preserved': {'records': 11, 'journals': 10}}, 'timestamp': '2026-11-27T04:03:31Z'}"
   },
   "details": {
     "declared_version": {
-      "version": "1.6.0",
+      "version": "1.8.0",
       "protocol": 1
     },
     "manifest_version": {
-      "version": "1.6.0",
-      "tag": "dev-tool-v1.6.0"
+      "version": "1.8.0",
+      "tag": "dev-tool-v1.8.0"
+    },
+    "signed_manifest": {
+      "payloadMatches": true,
+      "signatureVerified": true
     },
     "archive_version": {
-      "sha256": "66b699d2edf893f6",
-      "size": 71573,
+      "sha256": "56241476d8fd1d6f",
+      "size": 72310,
       "strayArchives": []
     },
     "no_secret_material": {
@@ -31,16 +35,9 @@
     },
     "release_commands": {
       "versions": [
-        "1.6.0"
-      ]
-    },
-    "acceptance_reports": {
-      "candidateToolVersion": "1.6.0",
-      "labToolVersions": [
-        "1.0.0",
-        "1.1.0"
+        "1.8.0"
       ]
     }
   },
-  "timestamp": "2026-11-27T04:06:55Z"
+  "timestamp": "2026-11-27T04:24:35Z"
 }

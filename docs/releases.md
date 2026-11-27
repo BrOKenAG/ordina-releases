@@ -259,7 +259,7 @@ python3 scripts/check_feeds.py --remote
 - 修复 `doctor` 在 `gh` 不存在时崩溃的问题（独立部署下 `gh` 可能不在 PATH）。
 - 工具清单改为**隔离测试信任链**：lab/debug 构建可用 `ORDINA_DEV_MANIFEST_PUBLIC_KEY` 注入一次性公钥，Release 构建编译期剔除；验收不再读取生产签名密钥。生产清单仍由发版人本机 `ordina-sparkle` 密钥签名（`build_dev_tool.py --sign`），这是客户端固定公钥验签的必要条件。
 - 新增 ENOSPC 专项测试（`Tests/test_enospc.py` 5 项 + 端到端 `enospc_consistency`）：写资产/写清单/写 journal 三个位置注入真实 `errno.ENOSPC`，验证无半写文件、事务记录可恢复且恢复后无重复。开发者中心验收现为 **27 项全 pass**。
-- 当前发布工具源码候选版本为 1.6.0，历史 1.0.0 元数据保留。候选清单尚未使用正式密钥签名；独立的 lab 工具包即使版本号相同，也不属于生产资产。
+- 当前发布工具源码候选版本为 1.8.0，未发布的历史候选仅在本机保留。候选清单已使用正式密钥签名；独立的 lab 工具包即使版本号相同，也不属于生产资产。
 - `publish_dev_tool.py` 统一工具通道的构建/签名/上传/清单发布/回滚准备；默认只预演（六阶段事务走 `DryRunBackend`，零副作用），`--publish-manifest --execute` 走阶段 A 持久事务，无裸 push / `gh api` / curl。回归见 `Tests/test_publish_dev_tool.py`（7 项）。
 - Xcode 工程已配置 1.10.0 (build 36)；完整三通道兼容矩阵与首次上线/回滚顺序见 [compatibility-matrix.md](compatibility-matrix.md)。
 
@@ -271,7 +271,7 @@ python3 scripts/check_feeds.py --remote
 
 ```bash
 # ===== 通道 1：开发者发布工具（先上线，不影响任何现网客户端） =====
-python3 scripts/build_dev_tool.py --version 1.6.0 --sign
+python3 scripts/build_dev_tool.py --version 1.8.0 --sign
 python3 scripts/build_dev_tool.py --check
 python3 scripts/check_dev_tool_versions.py
 
@@ -305,7 +305,7 @@ python3 scripts/rollback_feeds.py --to <已知良好提交> --dry-run
 python3 scripts/rollback_feeds.py --to <已知良好提交> --dry-run
 # 工具：清单回退 + 客户端本地工具回滚
 python3 scripts/durable_journal.py --rollback <发布事务记录>
-# 客户端：开发者中心 → 工具 → 回滚到 1.0.0
+# 客户端仅能回滚到本机已验证的旧工具版本；首次上线无线上旧版本。
 ```
 
 > 上述命令在获得明确授权前**全部不执行**；`publish_dev_tool.py` 不带 `--execute` 时只做六阶段预演。

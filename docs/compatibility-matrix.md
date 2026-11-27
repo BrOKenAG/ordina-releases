@@ -13,7 +13,7 @@
 | --- | --- | --- | --- | --- | --- |
 | 软件本体 | **1.10.0 (build 36)**（线上 1.9.6 / 35） | `appcast.xml` + `ordina-1.10.0-build.36.dmg` | Sparkle Ed25519（`ordina-sparkle`） | GitHub Releases + Pages 根 | 回退 appcast 到已知良好提交，资产不删 |
 | 插件 | 协议 **v2**（`descriptor` + `files[]`）；v1 保留兼容 | `registry.json`（format 2）+ 各插件 `manifest-v2.json`（format 1）+ Release 资产 | 同一把 `ordina-sparkle` Ed25519 | 主仓 + 各 `ordina-plugin-*` 仓 | 清单回退（事务/rollback_feeds 审查），资产不删 |
-| 开发者发布工具 | **1.6.0 候选**（protocol 1，`minClientVersion 1.10.0`） | `dev-tool/manifest.json` + `ordina-publisher-1.6.0.pyz` | 同一把 `ordina-sparkle` Ed25519 | `~/Library/Application Support/ordina/Developer/Publisher/versions/` | 清单回退 + 客户端本地工具回滚，资产不删 |
+| 开发者发布工具 | **1.8.0 候选**（protocol 1，`minClientVersion 1.10.0`） | `dev-tool/manifest.json` + `ordina-publisher-1.8.0.pyz` | 同一把 `ordina-sparkle` Ed25519 | `~/Library/Application Support/ordina/Developer/Publisher/versions/` | 清单回退 + 客户端本地工具回滚，资产不删 |
 
 三者共用同一个信任根（客户端编译期固定的 Ed25519 公钥），但**版本号、清单、目录、更新触发与回滚流程完全独立**：升级工具不会重签 App，发布插件不会改 appcast，App 更新不会替换已安装的工具或凭据。
 
@@ -38,10 +38,10 @@
 
 | 工具版本 | protocol | minClientVersion | 状态 | 说明 |
 | --- | --- | --- | --- | --- |
-| 1.0.0 | 1 | 1.10.0 | 保留历史元数据 | 资产和已有记录不覆盖 |
-| 1.6.0 | 1 | 1.10.0 | 本地候选，未正式签名及发布 | 隔离 lab 包使用不同信任链和内容 |
+| 1.0.0–1.7.0 | 1 | 1.10.0 | 本地测试候选，未发现线上 Release | 不纳入正式清单，资产仍保存在本机 |
+| 1.8.0 | 1 | 1.10.0 | 清单已签名，未发布 | 隔离 lab 包使用不同信任链和内容 |
 
-候选源码清单保留 1.0.0 至 1.5.0，并新增 1.6.0。签名清单尚未更新，正式上线前须重新签名并验证；lab 包不能用于生产发布。
+线上未发现 1.0.0 至 1.7.0 的工具 Release；正式候选清单仅列 1.8.0，避免引用不存在的资产。旧本地测试产物保存在 dist/local-unsigned-tool-history-20261127，lab 包不能用于生产发布。
 
 ## 首次上线顺序（严格按此顺序）
 
@@ -67,7 +67,7 @@
 
 1. **软件**：停止 appcast 广播 —— `rollback_feeds.py --to <已知良好提交> --dry-run` 核对后人工审查推送；不要删除仍被旧清单引用的 DMG。
 2. **插件**：清单回退到上一个签名版本，保留资产；逐一核对签名、版本、哈希与引用。
-3. **工具**：通过 `durable_journal.py --rollback <发布事务记录>` 恢复已验证的事务快照 → 客户端在「开发者中心 → 工具」执行本地回滚到 1.0.0；保留 `dev-tool-v1.0.0` 资产。
+3. **工具**：通过 `durable_journal.py --rollback <发布事务记录>` 恢复已验证的事务快照 → 首次上线没有可回滚到的线上工具版本，客户端需使用其本地已验证版本；历史资产不删除。
 
 未完成事务（journal `publishing` / `preparing`）存在时，客户端与脚本都会拒绝替换发布工具，避免恢复数据丢失。
 

@@ -192,6 +192,54 @@ class ProductionBackend(GitHubLabMultiBackend):
         if any(version not in after for version in before):
             raise ValueError('appcast 会删除历史版本，请先人工审查')
 
+    def _validate_registry_transition(self, old, new, desired, plan):
+        """Allow only the authorized plugin's signed, source-derived update."""
+        import build_feeds
+        from feed_signing import verify_envelope
+        match = re.fullmatch(r'BrOKenAG/ordina-plugin-([a-z][a-z0-9-]{0,31})', self.asset_repo)
+        if not match:
+            raise ValueError('registry changes require an authorized plugin release')
+        plugin_id = match.group(1)
+        if (old.get('format') != 2 or new.get('format') != 2 or
+            not isinstance(old.get('plugins'), dict) or not isinstance(new.get('plugins'), dict)):
+            raise ValueError('invalid registry format')
+        before, after = old['plugins'], new['plugins']
+        if set(after) - set(before) - {plugin_id} or set(before) - set(after):
+            raise ValueError('registry changes unrelated plugins')
+        if old.get('withdrawn', []) != new.get('withdrawn', []):
+            raise ValueError('registry lifecycle changes require a lifecycle transaction')
+        for name, item in before.items():
+            if not isinstance(item, dict) or not isinstance(after.get(name), dict):
+                raise ValueError('invalid registry descriptor')
+            locked = ('repository', 'feed', 'downloadPrefix', 'kind') if name == plugin_id else item.keys()
+            if any(after[name].get(key) != item.get(key) for key in locked):
+                raise ValueError('registry changes a protected descriptor')
+            if name == plugin_id and item.get('version') is not None:
+                import plugin_protocol
+                previous, current = item['version'], after[name].get('version')
+                if (not plugin_protocol.valid_version(previous) or not plugin_protocol.valid_version(current) or
+                    tuple(map(int, (current.split('.') + ['0'] * 4)[:4])) <
+                    tuple(map(int, (previous.split('.') + ['0'] * 4)[:4]))):
+                    raise ValueError('registry plugin version cannot decrease')
+        source_encoded = desired.get('plugins/registry.source.json')
+        if not source_encoded:
+            raise ValueError('registry update requires source metadata')
+        source = json.loads(base64.b64decode(source_encoded, validate=True))
+        if source.get('format') != 2 or not isinstance(source.get('plugins'), dict):
+            raise ValueError('invalid registry source')
+        registry, _, manifests = build_feeds.documents(source['plugins'])
+        if registry != new or plugin_id not in manifests:
+            raise ValueError('registry does not match the source metadata')
+        plugin_snapshot = json.loads(plan['feeds'].get(self.asset_repo, '{}'))
+        encoded = plugin_snapshot.get('manifest-v2.json')
+        if not encoded or verify_envelope(base64.b64decode(encoded, validate=True)) != manifests[plugin_id]:
+            raise ValueError('signed plugin manifest does not match registry source')
+        entry = manifests[plugin_id]['plugins'].get(plugin_id, {})
+        asset = plan['asset']
+        if (entry.get('url') != asset.get('url') or entry.get('sha256') != asset.get('sha256') or
+            entry.get('size') != asset.get('size')):
+            raise ValueError('plugin release does not match the transaction asset')
+
     def validate_transitions(self, plan):
         from feed_signing import verify_envelope
         for repo, raw in plan['feeds'].items():
@@ -208,8 +256,9 @@ class ProductionBackend(GitHubLabMultiBackend):
                 old = base64.b64decode(old_encoded, validate=True)
                 new = base64.b64decode(new_encoded, validate=True)
                 if path == 'registry.json':
-                    if verify_envelope(old) != verify_envelope(new):
-                        raise ValueError('registry changes require separate review')
+                    before, after = verify_envelope(old), verify_envelope(new)
+                    if before != after:
+                        self._validate_registry_transition(before, after, desired, plan)
                 elif path == 'appcast.xml':
                     self._validate_appcast_transition(old, new)
                 elif path == 'dev-tool/manifest.json':
