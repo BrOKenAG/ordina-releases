@@ -89,6 +89,16 @@ class DurableReleaseTests(unittest.TestCase):
         self.directory = Path(self.tmp.name)
         self.plan = make_plan()
 
+    def test_rolled_back_plan_starts_new_recoverable_attempt(self):
+        first = durable_release.prepare(self.plan, 'retry', journal_dir=self.directory)
+        first.journal.write_text(json.dumps({'status': 'rolled_back'}))
+        second = durable_release.prepare(self.plan, 'retry', journal_dir=self.directory)
+        self.assertNotEqual(first.journal, second.journal)
+        self.assertEqual(json.loads(first.journal.read_text())['status'], 'rolled_back')
+        second.journal.write_text(json.dumps({'status': 'publishing'}))
+        resumed = durable_release.prepare(self.plan, 'retry', journal_dir=self.directory)
+        self.assertEqual(second.journal, resumed.journal)
+
     def test_main_repository_files_are_never_attributed_to_the_plugin_repo(self):
         files = durable_release.collect_files(self.plan)
         self.assertEqual(set(files), {MAIN, PLUGIN})
