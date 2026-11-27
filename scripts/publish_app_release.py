@@ -93,7 +93,9 @@ def build_plan(args):
         notes=notes,
         asset=Asset(args.archive.name, archive, url),
         ed_signature=signature,
-        latest=False,
+        # 软件正式发布是面向全体用户的通道，须自动成为 GitHub Latest；
+        # 工具与插件发布保持 Plan.latest=False，不抢占 Latest。
+        latest=True,
         publish_appcast=args.publish_appcast,
         validation_report=args.validation_report,
         feeds=[FeedTarget('appcast', feed_bytes, path=ROOT / 'appcast.xml'),
