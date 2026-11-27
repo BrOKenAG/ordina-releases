@@ -330,7 +330,7 @@ python3 scripts/durable_journal.py --rollback <发布事务记录>
 - 四项 1.10.0 问题已按共用机制修复：Registry/清单底层错误透传、GUI 发布工具 PATH 补全、复合插件按全部必要组件与完整安装记录判断状态、失败不再伪造托管状态、本机脚本按记录路径去重并在安装后刷新。
 - 新增「从已安装插件直接上架」：本机脚本及状态完整的已安装插件可选择「上架插件」；从实际安装路径收集协议声明的必要文件与依赖，生成标准 ZIP，填写发布信息后进入开发者中心，经 TOTP、发布工具凭据、Ed25519 签名及现有六阶段事务发布；成功后写入托管记录并消除本机列表重复。仅打包已记录文件，拒绝缓存/密钥等路径；缺件时明确列出缺失项且不生成包。支持新插件首次上架与已有插件版本更新。
 - 版本号改为 1.10.1/build37；未构建、未签名、未发布、未推送。
-- **Release 构建修正（2026-11-27）**：本机非沙盒终端已进入 Swift 编译阶段，真实错误为 `OptionalPluginsView.swift:379` 回调重复包装 `.installed(...)`，导致 `PluginPublishing.Source` 与 `String` 类型不匹配；已改为直接透传回调参数并全模块 typecheck 通过。`build_app.py` 现区分沙盒权限失败与真实编译失败并输出完整编译诊断。请在原生「终端」或 Xcode.app 重跑 `bash scripts/local_xcode_build.sh --release` 完成构建与真实 App 验收；未发布。
+- **Release 构建与验收（2026-11-27）**：本机非沙盒终端的真实错误为 `OptionalPluginsView.swift:379` 回调重复包装 `.installed(...)`，已改为直接透传；全模块 Debug/Release typecheck 通过。`build_app.py` 现区分沙盒权限失败与真实编译错误。用户重跑 `bash scripts/local_xcode_build.sh --release` 成功，日志 `dist/build-logs/xcodebuild-20261127-151052.log`。`dist/ordina.app` 为 1.10.1/build37，严格签名与 `Tests/verify_app.py` 通过。真实 App 已启动；生产环境探针确认官方目录含 minutes 0.4.0 / multicam 2.1、minutes=`notInstalled`、multicam=`current(2.1)`、本机列表仅 `Import YueLiu.py` 且托管路径仅含 `Multicam Tools.py`（无重复），Import YueLiu 与 multicam 均满足打包条件；按 App 注入 PATH 后 `auth-authorize` 与 `lifecycle-list` 均返回成功。
 
 ### 收尾：GitHub Latest 计划修复与清理
 
