@@ -330,7 +330,7 @@ python3 scripts/durable_journal.py --rollback <发布事务记录>
 - 四项 1.10.0 问题已按共用机制修复：Registry/清单底层错误透传、GUI 发布工具 PATH 补全、复合插件按全部必要组件与完整安装记录判断状态、失败不再伪造托管状态、本机脚本按记录路径去重并在安装后刷新。
 - 新增「从已安装插件直接上架」：本机脚本及状态完整的已安装插件可选择「上架插件」；从实际安装路径收集协议声明的必要文件与依赖，生成标准 ZIP，填写发布信息后进入开发者中心，经 TOTP、发布工具凭据、Ed25519 签名及现有六阶段事务发布；成功后写入托管记录并消除本机列表重复。仅打包已记录文件，拒绝缓存/密钥等路径；缺件时明确列出缺失项且不生成包。支持新插件首次上架与已有插件版本更新。
 - 版本号改为 1.10.1/build37；未构建、未签名、未发布、未推送。
-- **Release 构建阻塞（2026-11-27 15:04）**：关闭 agent 沙盒后运行 `SWIFTPM_DISABLE_SANDBOX=1 python3 scripts/build_app.py --output dist/ordina.app`，`xcodebuild` 仍在 Resolve Package Graph 阶段报 `sandbox-exec: sandbox_apply: Operation not permitted`；失败证据见 `/var/folders/tz/n86m0_5s4yv2d5w0tpbp4rch0000gn/T/ResultBundle_2026-27-11_15-04-0003.xcresult`。须在 macOS 原生「终端」或 Xcode.app 内执行 `bash scripts/local_xcode_build.sh --release` 完成真实构建、签名与 App 验收；本会话不生成替代构建，不发布。
+- **Release 构建修正（2026-11-27）**：本机非沙盒终端已进入 Swift 编译阶段，真实错误为 `OptionalPluginsView.swift:379` 回调重复包装 `.installed(...)`，导致 `PluginPublishing.Source` 与 `String` 类型不匹配；已改为直接透传回调参数并全模块 typecheck 通过。`build_app.py` 现区分沙盒权限失败与真实编译失败并输出完整编译诊断。请在原生「终端」或 Xcode.app 重跑 `bash scripts/local_xcode_build.sh --release` 完成构建与真实 App 验收；未发布。
 
 ### 收尾：GitHub Latest 计划修复与清理
 

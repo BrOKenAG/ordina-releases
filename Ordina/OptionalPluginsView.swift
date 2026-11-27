@@ -376,7 +376,7 @@ struct ResolvePluginsPage: View {
                     sectionTitle("ordina 内置")
                     integrationRow
                     PaperRule()
-                    OptionalPluginsView(inManager: true, refreshRevision: revision) { beginPublish(.installed($0)) }
+                    OptionalPluginsView(inManager: true, refreshRevision: revision) { beginPublish($0) }
                     if !localScripts.isEmpty {
                         sectionTitle("本机脚本").padding(.top, 18)
                         ForEach(localScripts) { script in
