@@ -61,13 +61,14 @@ struct VerifyPluginInstaller {
             file("plugin.json", metadata, .metadata),
             file("demo.py", script, .utilityScript, install: "demo.py"),
             file("host.py", host, .support),
+            file("nested/one/two.txt", host, .support),
             file("host.command", command, .nativeMessagingHost, executable: true),
             file("extension/manifest.json", extensionManifest, .extension),
             file("chrome/com.demo.bridge.json", chrome, .nativeMessagingManifest,
                  install: "com.demo.bridge.json"),
         ]
         let data = ["plugin.json": metadata, "demo.py": script, "host.py": host,
-                    "host.command": command, "extension/manifest.json": extensionManifest,
+                    "host.command": command, "nested/one/two.txt": host, "extension/manifest.json": extensionManifest,
                     "chrome/com.demo.bridge.json": chrome]
         return (descriptor, files, data)
     }
@@ -109,7 +110,7 @@ struct VerifyPluginInstaller {
         try require(PluginInstaller.inspect(descriptor, environment: environment) == .current(version: "1.0.0"),
                     "should be current")
         let recorded = PluginInstaller.state("demo", environment: environment)
-        try require(recorded?.files.count == 5, "state should record five installed files")
+        try require(recorded?.files.count == 6, "state should record six installed files")
 
         // Idempotent reinstall.
         let backups = home.appendingPathComponent("Library/Application Support/ordina/Plugins/demo/backups")
@@ -166,6 +167,8 @@ struct VerifyPluginInstaller {
                     "support file left behind")
         try require(!manager.fileExists(atPath: support.appendingPathComponent("extension").path),
                     "empty extension folder left behind")
+        try require(!manager.fileExists(atPath: support.appendingPathComponent("nested").path),
+                    "empty nested folder left behind")
         try require(!manager.fileExists(atPath: manifestPath.path), "chrome manifest left behind")
         try require(try Data(contentsOf: userFile) == Data("keep".utf8), "uninstall removed user data")
         try require(PluginInstaller.state("demo", environment: environment) == nil, "state left behind")

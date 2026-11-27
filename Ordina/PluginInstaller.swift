@@ -317,8 +317,14 @@ enum PluginInstaller {
             // Remove now-empty plugin-owned subdirectories (for example
             // extension/) without touching anything the user added.
             if let support = supportDirectory(descriptor, environment: environment) {
-                let directories = Set(targets.filter { $0.path.hasPrefix(support.path + "/") }
-                    .map { $0.deletingLastPathComponent() })
+                var directories = Set<URL>()
+                for target in targets where target.path.hasPrefix(support.path + "/") {
+                    var directory = target.deletingLastPathComponent()
+                    while directory.path.hasPrefix(support.path + "/") {
+                        directories.insert(directory)
+                        directory.deleteLastPathComponent()
+                    }
+                }
                 for directory in directories.sorted(by: { $0.path.count > $1.path.count }) {
                     if let contents = try? manager.contentsOfDirectory(atPath: directory.path),
                        contents.isEmpty {
