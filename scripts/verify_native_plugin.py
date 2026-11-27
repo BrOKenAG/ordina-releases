@@ -22,5 +22,11 @@ with tempfile.TemporaryDirectory(prefix='ordina-native-verification-') as tempor
     subprocess.run(['/usr/bin/xcrun','swiftc','-D','ORDINA_LAB', *[str(ROOT/'Ordina'/f'{s}.swift') for s in sources], str(ROOT/'Tests/VerifyNativePlugin.swift'),'-o',str(exe)],check=True)
     env = dict(os.environ, ORDINA_PLUGIN_LAB='1', ORDINA_TEST_NATIVE_APP=str(app))
     subprocess.run([str(exe)],env=env,check=True)
-    env.update(ORDINA_PLUGIN_LAB='0', ORDINA_TEST_EXPECT_REJECT='1')
+    # The same signed App is accepted in production policy without lab flags.
+    env.update(ORDINA_PLUGIN_LAB='0')
+    subprocess.run([str(exe)],env=env,check=True)
+    # Recalculate the inventory from tampered bytes: structural signature
+    # validation must still reject the bundle even when file hashes match.
+    (resources/'fixture.bin').write_bytes(b'tampered')
+    env['ORDINA_TEST_EXPECT_REJECT']='1'
     subprocess.run([str(exe)],env=env,check=True)

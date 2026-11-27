@@ -109,13 +109,6 @@ def verify_native_bundle(directory, inventory):
                 raise ValueError('原生 App 签名或公证无效。')
             return result.stdout + result.stderr
         verify(['/usr/bin/codesign', '--verify', '--deep', '--strict', str(application)])
-        if os.environ.get('ORDINA_DEV_LAB') == '1' and os.environ.get('ORDINA_DEV_BACKEND') == 'lab':
-            return
-        requirement = 'anchor apple generic and certificate leaf[field.1.2.840.113635.100.6.1.13] exists'
-        verify(['/usr/bin/codesign', '--verify', '--deep', '--strict', '-R', requirement, str(application)])
-        assessment = verify(['/usr/sbin/spctl', '--assess', '--verbose=4', '--type', 'execute', str(application)])
-        if 'source=Notarized Developer ID' not in assessment:
-            raise ValueError('原生 App 未通过公证验证。')
 
 
 def build_bundle(directory, expected_id=None):

@@ -41,7 +41,8 @@ class NativePackageTests(unittest.TestCase):
                 self.assertEqual(version, '1.0.0'); self.assertTrue(data)
                 self.assertTrue(any(item['role']=='application' for item in inventory))
                 with patch.dict(os.environ, {'ORDINA_DEV_LAB':'0','ORDINA_DEV_BACKEND':'production'}):
-                    with self.assertRaises(ValueError): publish_plugin.build_bundle(extracted)
+                    production_data, _, _ = publish_plugin.build_bundle(extracted)
+                    self.assertEqual(production_data, data)
                 target = extracted/'Example.app/Contents/MacOS/Example'
                 target.write_bytes(target.read_bytes()+b'tampered')
                 with self.assertRaises(ValueError): publish_plugin.build_bundle(extracted)

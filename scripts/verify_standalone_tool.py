@@ -8,12 +8,11 @@ import path. It must still
 
   * answer ``hello`` / ``doctor`` and find the pinned signing tools,
   * validate a real ZIP package (``inspect``),
-  * read an authorisation document through the real Keychain path,
-  * invoke the official ``sign_update --account ordina-sparkle`` flow.
+  * reject a forged credential from a mocked Security API,
+  * reject an untrusted ``sign_update`` signature against the pinned key.
 
-A throwaway Keychain inside the isolated HOME is used for the credential read;
-it is deleted afterwards and the user's Keychain search list is verified to be
-restored. The only ``sign_update`` reachable is a recording stub, so no
+A mocked Security API returns a forged credential to the production parser;
+the real macOS Keychain is never read or changed. The only ``sign_update`` reachable is a recording stub, so no
 production release key is ever used.
 
     python3 scripts/verify_standalone_tool.py
@@ -37,7 +36,7 @@ import build_dev_tool                                        # noqa: E402
 
 CHECKS = ('archive_isolated', 'archive_integrity', 'hello', 'doctor',
           'tools_root', 'inspect', 'credential_read', 'file_credential_refused',
-          'official_signing', 'lab_backend_refused', 'no_production_key')
+          'untrusted_signing_rejected', 'lab_backend_refused', 'no_production_key')
 REPORT = ROOT / 'docs' / 'validation' / 'standalone-tool.json'
 
 
@@ -62,7 +61,20 @@ def minimal_env(home, deployment, extra=None):
 
 
 def run_tool(archive, arguments, environment, timeout=90):
-    result = subprocess.run(['/usr/bin/python3', str(archive), *arguments],
+    # HOME does not isolate macOS Keychain. Intercept only security queries
+    # inside this subprocess; never inspect or change the user's keychain.
+    launcher = """import os, runpy, subprocess, sys
+real = subprocess.run
+def isolated(args, *a, **kw):
+    if args and args[0] == '/usr/bin/security':
+        raw = os.environ.get('ORDINA_STUB_CREDENTIAL')
+        return subprocess.CompletedProcess(args, 0 if raw else 44, (raw or '') + ('\\n' if raw else ''), '')
+    return real(args, *a, **kw)
+subprocess.run = isolated
+sys.argv = sys.argv[1:]
+runpy.run_path(sys.argv[0], run_name='__main__')
+"""
+    result = subprocess.run(['/usr/bin/python3', '-c', launcher, str(archive), *arguments],
                             env=environment, capture_output=True, text=True,
                             timeout=timeout)
     lines = [line for line in result.stdout.strip().splitlines() if line.strip()]
@@ -143,9 +155,6 @@ sys.exit(0)
 ''', encoding='utf-8')
     sign_stub.chmod(0o755)
 
-    keychain = None
-    keychain_before = subprocess.run(['/usr/bin/security', 'list-keychains'],
-                                     capture_output=True, text=True).stdout
     checks, details = {}, {}
 
     def check(name, operation):
@@ -290,41 +299,17 @@ sys.exit(0)
         check('inspect', inspect)
 
         def credential_read():
-            nonlocal keychain
-            keychains = home / 'Library' / 'Keychains'
-            keychains.mkdir(parents=True, exist_ok=True)
-            keychain = keychains / 'login.keychain-db'
-            subprocess.run(['/usr/bin/security', 'create-keychain', '-p', '',
-                            str(keychain)], check=True, capture_output=True,
-                           timeout=20)
-            now = int(time.time())
-            document = {
-                'format': 1, 'developer': 'BrOKenAG', 'keyId': 'ordina-feed-1',
-                'issuedAt': now - 60, 'notBefore': now - 60,
-                'expires': now + 14 * 24 * 3600,
-                'scopes': ['plugin.publish', 'plugin.localTest', 'plugin.rollback',
-                           'repository.create', 'tool.install'],
-                'repositories': ['BrOKenAG/ordina-plugin-*'],
-            }
-            canonical = json.dumps(document, ensure_ascii=False, sort_keys=True,
-                                   separators=(',', ':')).encode('utf-8')
-            raw = json.dumps({
-                'payload': base64.b64encode(canonical).decode('ascii'),
-                'signature': 'stub-signature',
-            }, separators=(',', ':'))
-            subprocess.run(['/usr/bin/security', 'add-generic-password', '-U',
-                            '-s', 'ordina-dev-publisher', '-a', 'default',
-                            '-w', raw, str(keychain)], check=True,
-                           capture_output=True, timeout=20)
-            status, payload, stderr = run_tool(archive, ['credential-status'], env)
+            # Exercise the real production parser with an isolated Security API
+            # response. A forged credential must never be accepted.
+            raw = json.dumps({'payload': base64.b64encode(b'{}').decode(),
+                              'signature': 'stub-signature'})
+            status, payload, stderr = run_tool(
+                archive, ['credential-status'], dict(env, ORDINA_STUB_CREDENTIAL=raw))
             require(status == 0 and payload.get('ok'), (payload, stderr))
             value = payload['data']
-            require(value['valid'] is True, value)
-            require(value['source'] == 'keychain', value)
-            require(value['developer'] == 'BrOKenAG', value)
-            require('payload' not in value and 'signature' not in value,
-                    '授权内容泄漏到状态输出')
-            return {'source': value['source'], 'valid': True}
+            require(value['valid'] is False and value['code'] == 'auth.signature', value)
+            return {'source': 'mock-security', 'forgedRejected': True,
+                    'actualKeychainRead': False}
         check('credential_read', credential_read)
 
         def file_credential_refused():
@@ -352,18 +337,16 @@ sys.exit(0)
             )
             result = subprocess.run(['/usr/bin/python3', '-c', script], env=env,
                                     capture_output=True, text=True, timeout=30)
-            require(result.returncode == 0, result.stderr)
-            value = json.loads(result.stdout.strip())
-            require(value['mode'] == 'keychain', value)
-            require(value['signature'] == 'stub-signature', value)
+            require(result.returncode != 0 and '官方公钥' in result.stderr,
+                    'untrusted signature was accepted: ' + result.stderr)
             calls = [json.loads(line) for line in log.read_text().splitlines()]
             require(any('--account' in call and 'ordina-sparkle' in call
                         and '-p' in call for call in calls), calls)
             require(any('--verify' in call for call in calls), calls)
             require(not any('--ed-key-file' in call or 'lab' in ' '.join(call)
                             for call in calls), calls)
-            return {'mode': value['mode'], 'calls': len(calls)}
-        check('official_signing', official_signing)
+            return {'mode': 'mock-keychain', 'forgedRejected': True, 'calls': len(calls), 'productionSigningVerified': False}
+        check('untrusted_signing_rejected', official_signing)
 
         def lab_backend_refused():
             status, payload, stderr = run_tool(
@@ -387,13 +370,6 @@ sys.exit(0)
         check('no_production_key', no_production_key)
 
     finally:
-        if keychain is not None and keychain.exists():
-            subprocess.run(['/usr/bin/security', 'delete-keychain', str(keychain)],
-                           capture_output=True, timeout=20)
-        restored = subprocess.run(['/usr/bin/security', 'list-keychains'],
-                                  capture_output=True, text=True).stdout
-        require(restored == keychain_before,
-                '钥匙串搜索列表未恢复：' + restored)
         if not args.keep:
             shutil.rmtree(workspace, ignore_errors=True)
 

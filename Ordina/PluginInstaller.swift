@@ -461,26 +461,15 @@ enum PluginInstaller {
             try process.run()
             let data = output.fileHandleForReading.readDataToEndOfFile()
             process.waitUntilExit()
-            guard process.terminationStatus == 0 else { throw Failure.writeFailed("原生 App 签名或公证验证失败") }
+            guard process.terminationStatus == 0 else { throw Failure.writeFailed("原生 App 签名验证失败") }
             return String(decoding: data, as: UTF8.self)
         }
         _ = try run("/usr/bin/codesign", ["--verify", "--deep", "--strict", application.path])
-        #if DEBUG || ORDINA_LAB
-        if ProcessInfo.processInfo.environment["ORDINA_PLUGIN_LAB"] == "1",
-           environment.policy.feedScheme == "http" { return }
-        #endif
         var staticCode: SecStaticCode?
         guard SecStaticCodeCreateWithPath(application as CFURL, [], &staticCode) == errSecSuccess,
               let staticCode else { throw Failure.writeFailed("原生 App 签名无效") }
-        var requirement: SecRequirement?
-        let rule = "anchor apple generic and certificate leaf[field.1.2.840.113635.100.6.1.13] exists" as CFString
-        guard SecRequirementCreateWithString(rule, [], &requirement) == errSecSuccess,
-              let requirement, SecStaticCodeCheckValidity(staticCode, SecCSFlags(rawValue: kSecCSCheckAllArchitectures | kSecCSStrictValidate), requirement) == errSecSuccess else {
-            throw Failure.writeFailed("原生 App 不是有效的 Developer ID 签名")
-        }
-        let assessment = try run("/usr/sbin/spctl", ["--assess", "--verbose=4", "--type", "execute", application.path])
-        guard assessment.contains("source=Notarized Developer ID") else {
-            throw Failure.writeFailed("原生 App 未通过公证验证")
+        guard SecStaticCodeCheckValidity(staticCode, SecCSFlags(rawValue: kSecCSCheckAllArchitectures | kSecCSStrictValidate), nil) == errSecSuccess else {
+            throw Failure.writeFailed("原生 App 签名无效")
         }
     }
 

@@ -1,9 +1,9 @@
 {
   "format": 1,
   "passed": true,
-  "toolVersion": "1.0.0",
-  "archiveSha256": "b4e5db0a0cbcc0392143a5d83662072dc100d049588197d68d591d31bf02b6d8",
-  "archiveSize": 61252,
+  "toolVersion": "1.6.0",
+  "archiveSha256": "66b699d2edf893f62396471b635bc3330513664c073e3df54b060d019f55affc",
+  "archiveSize": 71573,
   "checks": {
     "archive_isolated": "pass",
     "archive_integrity": "pass",
@@ -13,22 +13,22 @@
     "inspect": "pass",
     "credential_read": "pass",
     "file_credential_refused": "pass",
-    "official_signing": "pass",
+    "untrusted_signing_rejected": "pass",
     "lab_backend_refused": "pass",
     "no_production_key": "pass"
   },
   "details": {
     "archive_isolated": {
-      "members": 18,
-      "directory": "/var/folders/tz/n86m0_5s4yv2d5w0tpbp4rch0000gn/T/ordina-standalone-w1pi3r14/deployment"
+      "members": 21,
+      "directory": "/var/folders/tz/n86m0_5s4yv2d5w0tpbp4rch0000gn/T/ordina-standalone-9czopq7k/deployment"
     },
     "archive_integrity": {
-      "sha256": "b4e5db0a0cbcc039",
-      "version": "1.0.0",
+      "sha256": "66b699d2edf893f6",
+      "version": "1.6.0",
       "labSigningUnreachable": true
     },
     "hello": {
-      "version": "1.0.0",
+      "version": "1.6.0",
       "python": "3.9.6"
     },
     "doctor": {
@@ -42,8 +42,8 @@
       }
     },
     "tools_root": {
-      "default": "/private/var/folders/tz/n86m0_5s4yv2d5w0tpbp4rch0000gn/T/ordina-standalone-w1pi3r14/home/Library/Application Support/ordina/Publisher/tools/sparkle-2.10.1",
-      "override": "/private/var/folders/tz/n86m0_5s4yv2d5w0tpbp4rch0000gn/T/ordina-standalone-w1pi3r14/explicit-tools"
+      "default": "/private/var/folders/tz/n86m0_5s4yv2d5w0tpbp4rch0000gn/T/ordina-standalone-9czopq7k/home/Library/Application Support/ordina/Publisher/tools/sparkle-2.10.1",
+      "override": "/private/var/folders/tz/n86m0_5s4yv2d5w0tpbp4rch0000gn/T/ordina-standalone-9czopq7k/explicit-tools"
     },
     "inspect": {
       "action": "new",
@@ -51,15 +51,18 @@
       "withoutRepository": true
     },
     "credential_read": {
-      "source": "keychain",
-      "valid": true
+      "source": "mock-security",
+      "forgedRejected": true,
+      "actualKeychainRead": false
     },
     "file_credential_refused": {
       "code": "auth.lab"
     },
-    "official_signing": {
-      "mode": "keychain",
-      "calls": 2
+    "untrusted_signing_rejected": {
+      "mode": "mock-keychain",
+      "forgedRejected": true,
+      "calls": 2,
+      "productionSigningVerified": false
     },
     "lab_backend_refused": {
       "code": "backend.lab"
@@ -70,5 +73,5 @@
       "signingPath": "sign_update --account ordina-sparkle (stub)"
     }
   },
-  "timestamp": "2026-11-25T10:11:29Z"
+  "timestamp": "2026-11-27T04:04:05Z"
 }

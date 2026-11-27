@@ -15,16 +15,16 @@ authorisation. No network call, no git push and no write to any online feed.
 The only path that can touch a remote is ``--publish-manifest --execute``; it
 goes through ``durable_release.execute`` (persistent journal, conditional
 writes, asset gate, online re-read), requires a valid isolated-lab report and
-an already-uploaded, verified Release asset. There is deliberately no direct
+an independently authorized and verified Release asset. There is deliberately no direct
 ``git push``, no ``gh api`` feed write and no curl to Pages.
 
-Release upload is a separate, explicit operator command printed below; the
-transaction's GATE stage refuses to proceed until that asset is downloadable.
+The same transaction creates the immutable Release asset when it is absent.
 """
 import argparse
 import base64
 import hashlib
 import json
+import os
 import sys
 import tempfile
 from pathlib import Path
@@ -33,6 +33,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'scripts'))
 import build_dev_tool                                        # noqa: E402
 import durable_release                                       # noqa: E402
+import durable_transaction as transaction                     # noqa: E402
 from feed_signing import canonical                           # noqa: E402
 from release_transaction import (Asset, DryRunGateway, FeedTarget,  # noqa: E402
                                  LocalGateway, Plan, ROOT as TX_ROOT,
@@ -55,6 +56,15 @@ def tool_document(version, data, notes):
 def asset_url(version):
     return (f'https://github.com/{MAIN}/releases/download/'
             f'dev-tool-v{version}/ordina-publisher-{version}.pyz')
+
+
+def validate_signed_manifest(raw, expected):
+    """Verify the pinned production signature before any remote operation."""
+    if os.environ.get('ORDINA_DEV_LAB') == '1' or os.environ.get('ORDINA_PLUGIN_LAB') == '1':
+        raise ValueError('隔离环境不能发布生产清单。')
+    from feed_signing import verify_envelope
+    if verify_envelope(raw) != expected:
+        raise ValueError('签名清单与当前构建不一致，请重新 --prepare。')
 
 
 def build_plan(version, data, manifest_bytes, notes):
@@ -86,6 +96,15 @@ def rehearsed_stages(plan, data, timeout):
         return result['stages'], staged.plan['feeds']
 
 
+def execute_release(plan, gateway, backend, staged, temporary, timeout):
+    """Serialize the upload and persist its plan before touching the remote."""
+    with transaction._local_lock(str(staged.journal) + '.release'):
+        journal = transaction._load(staged.plan, staged.journal)
+        if journal.get('status') in ('rolling_back', 'rolled_back'):
+            raise ValueError('事务正在回滚或已回滚，不能继续上传。')
+        return durable_release.execute(plan, gateway, backend, staged, temporary, timeout)
+
+
 def commands(version, notes, rollback_to=None):
     asset = f'ordina-publisher-{version}.pyz'
     tag = f'dev-tool-v{version}'
@@ -95,12 +114,7 @@ def commands(version, notes, rollback_to=None):
         'python3 scripts/build_dev_tool.py --check',
         'python3 scripts/check_dev_tool_versions.py',
         '',
-        '# 2) 上传 Release 资产（发版人手动执行；GATE 会先下载校验）',
-        f'gh release create {tag} dist/dev-tool/{asset} \\',
-        f'  --repo {MAIN} --title "ordina publisher {version}" '
-        f'--notes "{notes or "首个独立发布工具"}"',
-        '',
-        '# 3) 通过阶段 A 持久事务发布签名清单（禁止直接覆盖 Pages / 裸 push）',
+        '# 2) 通过持久事务上传资产并发布签名清单',
         'python3 scripts/publish_dev_tool.py --publish-manifest --execute \\',
         '  --lab-report docs/validation/lab-release.json',
         '',
@@ -109,10 +123,7 @@ def commands(version, notes, rollback_to=None):
         'python3 scripts/verify_standalone_tool.py',
         '',
         '# 回滚：清单回退 + 客户端本地工具回滚；Release 资产不删除',
-        ('python3 scripts/publish_dev_tool.py --rollback-to ' +
-         (rollback_to or '<上一个已知良好版本>') + ' --prepare'),
-        'python3 scripts/publish_dev_tool.py --publish-manifest --execute \\',
-        '  --lab-report docs/validation/lab-release.json',
+        'python3 scripts/durable_journal.py --rollback <发布事务记录>',
         '# 客户端：开发者中心 → 工具 → 回滚到 ' + (rollback_to or '<上一个版本>'),
     ]
 
@@ -153,10 +164,8 @@ def main():
         lines = commands(version, notes, args.rollback_to)
         if args.rollback_plan:
             lines = [line for line in lines if line.startswith('# 回滚')
-                     or line.startswith(('python3 scripts/publish_dev_tool.py '
-                                         '--rollback-to',
-                                         'python3 scripts/publish_dev_tool.py '
-                                         '--publish-manifest',
+                     or line.startswith(('python3 scripts/durable_journal.py '
+                                         '--rollback',
                                          '# 客户端'))]
         print('\n'.join(lines))
         return
@@ -209,12 +218,10 @@ def main():
         if not durable_release.lab_report_valid(args.lab_report):
             sys.exit('缺少有效的隔离仓库验证报告（--lab-report），已停止发布。')
         signed = MANIFEST_PATH.read_bytes()
-        envelope = json.loads(signed)
-        if envelope.get('signature', '').startswith('<REHEARSAL'):
-            sys.exit('清单尚未签名，请先 --prepare。')
-        payload = json.loads(base64.b64decode(envelope['payload'], validate=True))
-        if payload != document:
-            sys.exit('签名清单与当前构建不一致，请重新 --prepare。')
+        try:
+            validate_signed_manifest(signed, document)
+        except (ValueError, KeyError, TypeError) as error:
+            sys.exit('签名清单无效：' + str(error))
         live = build_plan(version, data, signed, notes)
         with tempfile.TemporaryDirectory(prefix='ordina-tool-release-') as temporary:
             tmp = Path(temporary)
@@ -222,8 +229,8 @@ def main():
                                              journal_dir=args.journal_dir)
             backend = durable_release.production_backend(staged, live)
             try:
-                result = durable_release.execute(live, LocalGateway(), backend,
-                                                 staged, tmp, args.timeout)
+                result = execute_release(live, LocalGateway(), backend,
+                                         staged, tmp, args.timeout)
             except ReleaseError as error:
                 sys.exit(durable_release.describe(error, staged.journal))
         print(f'已发布 {live.label}（{result["asset"]}）')
