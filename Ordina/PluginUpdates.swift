@@ -96,6 +96,7 @@ enum PluginUpdates {
         var bytes = Data()
         var accepted = false
         var failure: Error?
+        var lastProgress = Date()
         init(limit: Int, url: URL) { self.limit = limit; self.url = url }
         private func fail(_ reason: String) -> PluginProtocol.Failure {
             .detail("无法获取 \(url.host ?? url.absoluteString) 的资源：\(reason)")
@@ -128,6 +129,7 @@ enum PluginUpdates {
                 return
             }
             bytes.append(data)
+            lastProgress = Date()
         }
         func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
             if let error {
@@ -146,7 +148,10 @@ enum PluginUpdates {
         let delegate = BoundedDownload(limit: maxBytes, url: url)
         let configuration = URLSessionConfiguration.ephemeral
         configuration.timeoutIntervalForRequest = 8
-        configuration.timeoutIntervalForResource = 12
+        // A signed release bundle can be tens of megabytes behind a proxy.
+        // A fixed whole-resource deadline makes steady transfers fail with
+        // NSURLError -1001; progress is monitored below instead.
+        configuration.timeoutIntervalForResource = 0
         configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
         if disableProxy { configuration.connectionProxyDictionary = [:] }
         let queue = OperationQueue()
@@ -154,11 +159,20 @@ enum PluginUpdates {
         let session = URLSession(configuration: configuration, delegate: delegate, delegateQueue: queue)
         let task = session.dataTask(with: url)
         task.resume()
-        guard delegate.done.wait(timeout: .now() + 13) == .success else {
+        let started = Date()
+        var stalled = false
+        while delegate.done.wait(timeout: .now() + 1) != .success {
+            let idle = Date().timeIntervalSince(delegate.lastProgress)
+            if idle > 8 || Date().timeIntervalSince(started) > 180 {
+                stalled = true
+                break
+            }
+        }
+        if stalled {
             task.cancel()
             session.invalidateAndCancel()
             throw PluginProtocol.Failure.detail(
-                "请求 \(url.absoluteString) 超过 13 秒未响应（请求超时 8 秒，资源超时 12 秒）。")
+                "请求 \(url.host ?? url.absoluteString) 连续 8 秒无响应，已中止下载。")
         }
         session.finishTasksAndInvalidate()
         if let failure = delegate.failure { throw failure }

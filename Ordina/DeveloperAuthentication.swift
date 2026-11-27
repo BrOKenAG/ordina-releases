@@ -6,17 +6,27 @@ import LocalAuthentication
 final class DeveloperAuthentication: ObservableObject {
     @Published var bound = false
     @Published var unlocked = false
+    @Published var deviceTrusted = false
     @Published var busy = false
     @Published var error: String?
     @Published var setupURI: String?
     private var pending: Data?
-    private var session = DeveloperAuthState()
+    private let session = DeveloperAuthSession.shared
+    private var attempts = DeveloperAuthState()
+    private var sessionCancellable: AnyCancellable?
     #if ORDINA_LAB
     private var recoveryCheck: (() async throws -> Void)?
-    init(recoveryCheck: (() async throws -> Void)? = nil) { self.recoveryCheck = recoveryCheck }
+    init(recoveryCheck: (() async throws -> Void)? = nil) {
+        self.recoveryCheck = recoveryCheck
+        attachSession()
+    }
     #else
-    init() {}
+    init() { attachSession() }
     #endif
+
+    private func attachSession() {
+        sessionCancellable = session.$unlocked.sink { [weak self] in self?.unlocked = $0 }
+    }
 
     private func verifyRecovery() async throws {
         #if ORDINA_LAB
@@ -51,9 +61,25 @@ final class DeveloperAuthentication: ObservableObject {
         return DeveloperAuthKeychain(service: service)
     }
 
+    private var trustStore: DeveloperAuthKeychain {
+        let service = (Bundle.main.bundleIdentifier ?? "com.ordina.app") + ".developer-device-trust"
+        #if DEBUG || ORDINA_LAB
+        if DevBridge.isLab {
+            let root = DeveloperPaths.home
+            let path = root.appendingPathComponent("ordina-device-trust-test.keychain-db").path
+            let passwordPath = root.appendingPathComponent("ordina-totp-keychain-password")
+            return DeveloperAuthKeychain(service: service, isolatedPath: path,
+                                         isolatedPassword: try? Data(contentsOf: passwordPath))
+        }
+        #endif
+        return DeveloperAuthKeychain(service: service)
+    }
+
     func load() {
-        do { bound = try store.read() != nil }
-        catch { self.error = "无法读取钥匙串。" }
+        do {
+            bound = try store.read() != nil
+            deviceTrusted = try trustStore.read() != nil
+        } catch { self.error = "无法读取钥匙串。" }
     }
 
     private func authorize(_ configuration: DeveloperConfiguration) async throws {
@@ -109,26 +135,60 @@ final class DeveloperAuthentication: ObservableObject {
                     if failures >= 5 { record.retryAfter = now + 30 }
                     try store.save(record)
                 } else {
-                    session.failed(at: ProcessInfo.processInfo.systemUptime)
+                    attempts.failed(at: ProcessInfo.processInfo.systemUptime)
                 }
                 throw DevBridgeError.response("验证码无效或已使用。")
             }
-            if pending != nil && !session.canAttempt(at: ProcessInfo.processInfo.systemUptime) {
+            if pending != nil && !attempts.canAttempt(at: ProcessInfo.processInfo.systemUptime) {
                 throw DevBridgeError.response("尝试次数过多，请稍后重试。")
             }
             try await authorize(configuration)
             current = DeveloperAuthRecord(secret: secret, lastCounter: counter)
             try store.save(current!)
             pending = nil; setupURI = nil; bound = true
-            session.unlock(at: ProcessInfo.processInfo.systemUptime)
-            unlocked = true
+            session.unlock()
         } catch { self.error = error.localizedDescription }
     }
 
-    func lock() { session.lock(); unlocked = false; cancelBinding() }
-    func tick() {
-        if unlocked && !session.isUnlocked(at: ProcessInfo.processInfo.systemUptime) { lock() }
+    /// Store only a random local token after a full TOTP + official authority
+    /// verification plus macOS local authentication. No password is saved.
+    func trustThisMac(_ configuration: DeveloperConfiguration) async {
+        guard !busy, bound, session.unlocked else { return }
+        busy = true; error = nil
+        defer { busy = false }
+        do {
+            try await verifyRecovery()
+            try await authorize(configuration)
+            try trustStore.save(DeveloperAuthRecord(secret: DeveloperAuthKeychain.generateSecret()))
+            deviceTrusted = true
+        } catch { self.error = error.localizedDescription }
     }
+
+    func unlockWithDeviceTrust(_ configuration: DeveloperConfiguration) async {
+        guard !busy, deviceTrusted else { return }
+        busy = true; error = nil
+        defer { busy = false }
+        do {
+            try await verifyRecovery()
+            try await authorize(configuration)
+            session.unlock()
+        } catch { self.error = error.localizedDescription }
+    }
+
+    func revokeTrust(_ configuration: DeveloperConfiguration) async {
+        guard !busy else { return }
+        busy = true; error = nil
+        defer { busy = false }
+        do {
+            try await verifyRecovery()
+            try await authorize(configuration)
+            try trustStore.remove()
+            deviceTrusted = false
+        } catch { self.error = error.localizedDescription }
+    }
+
+    func lock() { session.lock(); cancelBinding() }
+    func tick() { session.tick() }
 
     func revoke(_ configuration: DeveloperConfiguration) async {
         guard !busy else { return }
@@ -138,7 +198,8 @@ final class DeveloperAuthentication: ObservableObject {
             try await verifyRecovery()
             try await authorize(configuration)
             try store.remove()
-            bound = false; lock()
+            try? trustStore.remove()
+            bound = false; deviceTrusted = false; lock()
         } catch { self.error = error.localizedDescription }
     }
 

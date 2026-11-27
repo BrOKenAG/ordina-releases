@@ -15,6 +15,7 @@ struct DeveloperCenterView: View {
     @StateObject private var auth = DeveloperAuthentication()
     @State private var configuringAuthentication = false
     @State private var confirmingRevoke = false
+    @State private var confirmingRevokeTrust = false
     @Environment(\.dismiss) private var dismiss
     @State private var selectingPackage = false
     @State private var selectingCredential = false
@@ -68,17 +69,24 @@ struct DeveloperCenterView: View {
         }
         .frame(width: 760, height: 720)
         .background(Paper.background).foregroundStyle(Paper.ink)
-        .task { auth.load(); await model.load() }
+        .task {
+            auth.load()
+            await model.load()
+            if auth.unlocked, let launch { await model.consumeLaunch(launch) }
+        }
         .onChange(of: auth.unlocked) { unlocked in
             guard unlocked, let launch else { return }
             Task { await model.consumeLaunch(launch) }
         }
         .onReceive(Timer.publish(every: 1, on: .main, in: .common).autoconnect()) { _ in auth.tick() }
-        .onDisappear { auth.lock() }
         .confirmationDialog("撤销本机认证？", isPresented: $confirmingRevoke, titleVisibility: .visible) {
             Button("撤销认证", role: .destructive) { Task { await auth.revoke(model.configuration) } }
             Button("取消", role: .cancel) {}
         } message: { Text("撤销后需要重新绑定验证器。") }
+        .confirmationDialog("撤销此 Mac 信任？", isPresented: $confirmingRevokeTrust, titleVisibility: .visible) {
+            Button("撤销信任", role: .destructive) { Task { await auth.revokeTrust(model.configuration) } }
+            Button("取消", role: .cancel) {}
+        } message: { Text("撤销后重新解锁需要输入 Authenticator 验证码。") }
         .fileImporter(isPresented: $selectingPackage,
                       allowedContentTypes: [.zip], allowsMultipleSelection: false) { result in
             if case .success(let urls) = result, let url = urls.first {
@@ -122,6 +130,12 @@ struct DeveloperCenterView: View {
             }
             Spacer()
             if auth.unlocked {
+                if !auth.deviceTrusted {
+                    Button("信任此 Mac") { Task { await auth.trustThisMac(model.configuration) } }
+                        .buttonStyle(PaperQuietButton()).disabled(auth.busy)
+                } else {
+                    Button("撤销此 Mac 信任") { confirmingRevokeTrust = true }.buttonStyle(PaperQuietButton())
+                }
                 Button("锁定") { auth.lock() }.buttonStyle(PaperQuietButton())
                 Button("撤销认证") { confirmingRevoke = true }.buttonStyle(PaperQuietButton())
             }

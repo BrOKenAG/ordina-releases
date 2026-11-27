@@ -331,6 +331,8 @@ python3 scripts/durable_journal.py --rollback <发布事务记录>
 - 新增「从已安装插件直接上架」：本机脚本及状态完整的已安装插件可选择「上架插件」；从实际安装路径收集协议声明的必要文件与依赖，生成标准 ZIP，填写发布信息后进入开发者中心，经 TOTP、发布工具凭据、Ed25519 签名及现有六阶段事务发布；成功后写入托管记录并消除本机列表重复。仅打包已记录文件，拒绝缓存/密钥等路径；缺件时明确列出缺失项且不生成包。支持新插件首次上架与已有插件版本更新。
 - 版本号改为 1.10.1/build37；未构建、未签名、未发布、未推送。
 - **Release 构建与验收（2026-11-27）**：本机非沙盒终端的真实错误为 `OptionalPluginsView.swift:379` 回调重复包装 `.installed(...)`，已改为直接透传；全模块 Debug/Release typecheck 通过。`build_app.py` 现区分沙盒权限失败与真实编译错误。用户重跑 `bash scripts/local_xcode_build.sh --release` 成功，日志 `dist/build-logs/xcodebuild-20261127-151052.log`。`dist/ordina.app` 为 1.10.1/build37，严格签名与 `Tests/verify_app.py` 通过。真实 App 已启动；生产环境探针确认官方目录含 minutes 0.4.0 / multicam 2.1、minutes=`notInstalled`、multicam=`current(2.1)`、本机列表仅 `Import YueLiu.py` 且托管路径仅含 `Multicam Tools.py`（无重复），Import YueLiu 与 multicam 均满足打包条件；按 App 注入 PATH 后 `auth-authorize` 与 `lifecycle-list` 均返回成功。
+- **发布暂停与回滚（2026-11-27 15:20）**：真实 App 验收发现 GitHub 下载超时与上架认证循环，暂停发布。已回滚两次 `preparing` 事务并删除刚创建的 `v1.10.1-build.37` Release/DMG；线上 appcast / registry / 插件清单未变，`check_feeds.py --remote` 19/19 通过。首页插件中心与设置图标改为模块化四宫格与调节线，复用 `DoodleIcon`、`PaperQuietButton`，按钮位置/点击区域/功能不变。
+- **根因与修复（待重建）**：GitHub 请求实际为 32,979,280 字节的 Release 资产经 `release-assets.githubusercontent.com` 重定向下载；原固定 12 秒整体资源超时在慢速代理下稳定触发 `NSURLErrorDomain -1001`。改为按接收进度判定停滞（连续 8 秒无数据才中止，180 秒安全上限），并保留字节上限与签名校验；实测 19.3 秒完整下载成功。认证循环改为 `DeveloperAuthSession` 全局 30 分钟会话，所有开发者入口共享；新增「信任此 Mac」（本机 Keychain 随机令牌 + LocalAuthentication，需再次通过官方权限验证，不保存系统密码，可撤销）；验证成功后自动恢复原上架任务（来源与发布信息由 `Launch` 保留）。全模块 Debug/Release typecheck 通过；须重建并 GUI 验收后再申请发布。
 
 ### 收尾：GitHub Latest 计划修复与清理
 

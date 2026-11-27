@@ -146,12 +146,11 @@ struct WorkspaceView: View {
         .overlay(alignment: .topTrailing) {
             HStack(spacing: 4) {
                 Button { showingPlugins = true } label: {
-                    Image(systemName: "puzzlepiece.extension").font(.system(size: 23))
-                        .frame(width: 24, height: 24)
+                    DoodleIcon(.pluginGrid).frame(width: 24, height: 24)
                 }
-                .buttonStyle(PaperQuietButton()).help("插件管理").accessibilityLabel("插件管理")
+                .buttonStyle(PaperQuietButton()).help("插件中心").accessibilityLabel("插件中心")
                 Button { settings = true } label: {
-                    Image(systemName: "gearshape").font(.system(size: 23))
+                    DoodleIcon(.sliders).frame(width: 24, height: 24)
                 }
                 .buttonStyle(PaperQuietButton()).help("设置").accessibilityLabel("设置")
             }

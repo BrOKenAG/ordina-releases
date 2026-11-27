@@ -30,8 +30,17 @@ struct DeveloperAuthenticationView: View {
                 Text("输入 Authenticator 中的六位动态验证码")
                     .font(.system(size: 13)).foregroundStyle(Paper.secondary).padding(.top, 8)
             }
+            if auth.deviceTrusted && auth.setupURI == nil {
+                Button("使用此 Mac 解锁") { Task { await auth.unlockWithDeviceTrust(configuration) } }
+                    .buttonStyle(.plain).font(.system(size: 15, weight: .medium))
+                    .foregroundStyle(Paper.onAccent).frame(maxWidth: .infinity).frame(height: 48)
+                    .background(accent, in: RoundedRectangle(cornerRadius: 12))
+                    .disabled(auth.busy).padding(.top, 20)
+                Text("通过 Touch ID 或系统登录密码解锁，不保存密码。")
+                    .font(.system(size: 12)).foregroundStyle(Paper.secondary).padding(.top, 6)
+            }
             if auth.bound || auth.setupURI != nil {
-                codeField.padding(.top, auth.setupURI == nil ? 28 : 12)
+                codeField.padding(.top, auth.setupURI == nil ? (auth.deviceTrusted ? 14 : 28) : 12)
                 Button("验证身份") { submit() }
                     .buttonStyle(.plain).font(.system(size: 15, weight: .medium))
                     .foregroundStyle(Paper.onAccent).frame(maxWidth: .infinity).frame(height: 48)
@@ -54,6 +63,9 @@ struct DeveloperAuthenticationView: View {
             HStack(spacing: 18) {
                 if auth.bound && auth.setupURI == nil {
                     Button("无法访问身份验证器？") { Task { await auth.beginBinding(configuration) } }
+                }
+                if auth.deviceTrusted && auth.setupURI == nil {
+                    Button("撤销此 Mac 信任") { Task { await auth.revokeTrust(configuration) } }
                 }
                 if auth.setupURI != nil {
                     Button("取消") { auth.cancelBinding(); code = "" }

@@ -90,7 +90,7 @@ enum PluginPublishing {
         guard toolReady else { return false }
         let auth = DeveloperAuthentication()
         auth.load()
-        return auth.bound
+        return auth.bound || auth.deviceTrusted
     }
 
     static func suggestedInfo(_ source: Source,
