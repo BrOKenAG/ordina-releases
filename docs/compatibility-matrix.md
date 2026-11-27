@@ -13,7 +13,7 @@
 | --- | --- | --- | --- | --- | --- |
 | 软件本体 | **1.10.0 (build 36)**（线上 1.9.6 / 35） | `appcast.xml` + `ordina-1.10.0-build.36.dmg` | Sparkle Ed25519（`ordina-sparkle`） | GitHub Releases + Pages 根 | 回退 appcast 到已知良好提交，资产不删 |
 | 插件 | 协议 **v2**（`descriptor` + `files[]`）；v1 保留兼容 | `registry.json`（format 2）+ 各插件 `manifest-v2.json`（format 1）+ Release 资产 | 同一把 `ordina-sparkle` Ed25519 | 主仓 + 各 `ordina-plugin-*` 仓 | 清单回退（事务/rollback_feeds 审查），资产不删 |
-| 开发者发布工具 | **1.1.0 候选**（protocol 1，`minClientVersion 1.10.0`） | `dev-tool/manifest.json` + `ordina-publisher-1.1.0.pyz` | 同一把 `ordina-sparkle` Ed25519 | `~/Library/Application Support/ordina/Developer/Publisher/versions/` | 清单回退 + 客户端本地工具回滚，资产不删 |
+| 开发者发布工具 | **1.5.0 候选**（protocol 1，`minClientVersion 1.10.0`） | `dev-tool/manifest.json` + `ordina-publisher-1.5.0.pyz` | 同一把 `ordina-sparkle` Ed25519 | `~/Library/Application Support/ordina/Developer/Publisher/versions/` | 清单回退 + 客户端本地工具回滚，资产不删 |
 
 三者共用同一个信任根（客户端编译期固定的 Ed25519 公钥），但**版本号、清单、目录、更新触发与回滚流程完全独立**：升级工具不会重签 App，发布插件不会改 appcast，App 更新不会替换已安装的工具或凭据。
 
@@ -32,16 +32,16 @@
 | v1 | `manifest.json` | `version` / `url` / `sha256` / `length` | 1.9.6 及更早 | 只读兼容，不再新增 |
 | v2 | `manifest-v2.json` | 兼容条目 + `descriptor` + `files[]` | 1.10.0 | 能力白名单仅 `resolve.utilityScript`、`resolve.support`、`chrome.nativeMessagingHost`、`chrome.unpackedExtension` |
 
-`registry.json` 保持 `format: 2` 且只追加字段，因此**先发布 registry 不会破坏 1.9.6**。v2 清单里的 `descriptor` / `files[]` 对旧客户端是未知字段，会被忽略。
+`registry.json` 保持 `format: 2`；1.9.6 的真实升级兼容性仍需实际验证。v2 清单里的 `descriptor` / `files[]` 对旧客户端是未知字段，会被忽略。
 
 ## 工具版本矩阵
 
 | 工具版本 | protocol | minClientVersion | 状态 | 说明 |
 | --- | --- | --- | --- | --- |
 | 1.0.0 | 1 | 1.10.0 | 保留历史元数据 | 资产和已有记录不覆盖 |
-| 1.1.0 | 1 | 1.10.0 | 本地候选，未正式签名及发布 | 隔离 lab 包使用不同信任链和内容 |
+| 1.5.0 | 1 | 1.10.0 | 本地候选，未正式签名及发布 | 隔离 lab 包使用不同信任链和内容 |
 
-候选源码清单保留 1.0.0 并新增 1.1.0。签名清单尚未更新，正式上线前须重新签名并验证；lab 包不能用于生产发布。
+候选源码清单保留 1.0.0 至 1.4.0，并新增 1.5.0。签名清单尚未更新，正式上线前须重新签名并验证；lab 包不能用于生产发布。
 
 ## 首次上线顺序（严格按此顺序）
 
@@ -49,7 +49,7 @@
 
 1. **工具通道先行（不影响任何现网用户）**
    - 本地构建并签名 `dev-tool/manifest.json`（`build_dev_tool.py --sign`）。
-   - 经授权后上传 `dev-tool-v1.1.0` 的 Release 资产。
+   - 工具资产上传尚未接入完整事务及独立授权检查，修复前禁止发布。
    - 通过阶段 A 持久事务发布 `dev-tool/manifest.json`（`publish_dev_tool.py --publish-manifest --execute`）。
    - 此时 1.9.6 客户端没有开发者中心，不会读取该清单。
 2. **插件通道（保持兼容，可随 1.10.0 一起）**
