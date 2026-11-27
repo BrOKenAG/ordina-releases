@@ -19,6 +19,7 @@ from pathlib import Path
 
 KEYCHAIN_SERVICE = 'ordina-dev-publisher'
 KEYCHAIN_ACCOUNT = 'default'
+SCOPED_KEYCHAIN_SERVICE = 'ordina-dev-publisher.scoped'
 KEY_ID = 'ordina-feed-1'
 MAX_LIFETIME = 400 * 24 * 3600
 SCOPES = ('plugin.publish', 'plugin.localTest', 'plugin.rollback',
@@ -176,5 +177,33 @@ def load(path=None, scope=None, repository=None):
     """Read, verify and authorise one credential for a concrete action."""
     raw, source = read_raw(path)
     document = verify_raw(raw)
-    check(document, scope=scope, repository=repository)
+    try:
+        check(document, scope=scope, repository=repository)
+    except CredentialError as error:
+        if (error.code not in ('auth.scope', 'auth.repository') or path is not None
+                or _is_lab() or not repository):
+            raise
+        scoped = _read_keychain(SCOPED_KEYCHAIN_SERVICE, repository)
+        if not scoped:
+            raise
+        document = verify_raw(scoped)
+        check(document, scope=scope, repository=repository)
+        if document.get('repositories') != [repository]:
+            _fail('auth.repository', '临时授权仓库范围无效。')
+        source = 'keychain-scoped'
     return document, source
+
+
+def store_scoped(raw, repository):
+    """Store a signed, narrowly scoped authorization without replacing the original."""
+    if _is_lab():
+        _fail('auth.lab', '隔离环境不允许修改钥匙串。')
+    document = verify_raw(raw)
+    check(document, scope='plugin.publish', repository=repository)
+    if document.get('repositories') != [repository] or document['expires'] - document['issuedAt'] > 1800:
+        _fail('auth.invalid', '临时授权范围或期限无效。')
+    result = subprocess.run(['/usr/bin/security', 'add-generic-password', '-U', '-s',
+                             SCOPED_KEYCHAIN_SERVICE, '-a', repository, '-w', raw.strip()],
+                            capture_output=True, text=True)
+    if result.returncode != 0:
+        _fail('auth.keychain', '无法保存临时授权。')

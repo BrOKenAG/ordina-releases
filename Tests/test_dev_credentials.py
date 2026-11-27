@@ -63,6 +63,30 @@ class LabEnvironment(unittest.TestCase):
 
 
 class SignatureTests(LabEnvironment):
+    def test_scoped_store_rejects_other_repository_without_writing(self):
+        scoped = document(repositories=['BrOKenAG/ordina-plugin-other'],
+                          scopes=['plugin.publish', 'repository.create'])
+        with patch.dict(os.environ, {'ORDINA_DEV_LAB': '0'}), \
+             patch.object(dc, 'verify_raw', return_value=scoped), \
+             patch.object(dc.subprocess, 'run') as security:
+            with self.assertRaises(dc.CredentialError):
+                dc.store_scoped('signed', 'BrOKenAG/ordina-plugin-new')
+            security.assert_not_called()
+
+    def test_scoped_keychain_credential_is_limited_to_its_repository(self):
+        repo = 'BrOKenAG/ordina-plugin-new'
+        primary = signed(document(repositories=['BrOKenAG/ordina-plugin-existing']))
+        scoped = signed(document(repositories=[repo], scopes=['plugin.publish', 'repository.create']))
+        with patch.dict(os.environ, {'ORDINA_DEV_LAB': '0'}), \
+             patch.object(dc, 'read_raw', return_value=(primary, 'keychain')), \
+             patch.object(dc, '_read_keychain', return_value=scoped), \
+             patch.object(dc, 'verify_raw', side_effect=lambda raw: json.loads(base64.b64decode(json.loads(raw)['payload']))):
+            value, source = dc.load(scope='plugin.publish', repository=repo)
+            self.assertEqual(value['repositories'], [repo])
+            self.assertEqual(source, 'keychain-scoped')
+            with self.assertRaises(dc.CredentialError):
+                dc.load(scope='plugin.publish', repository='BrOKenAG/ordina-plugin-other')
+
     def test_signed_document_verifies(self):
         value = dc.verify_raw(signed(document()))
         self.assertEqual(value['developer'], 'BrOKenAG')

@@ -15,6 +15,17 @@ class LifecyclePlanTests(unittest.TestCase):
     def setUp(self):
         self.source = {'format': 2, 'plugins': build_feeds.load_source()}
 
+    def test_icon_update_changes_signed_metadata_without_replacing_asset(self):
+        old = self.source['plugins']['minutes']
+        change = plugin_lifecycle.plan(self.source, 'minutes', True, 'camera')
+        target = change['after']['plugins']['minutes']
+        self.assertTrue(change['iconChanged'])
+        self.assertEqual(target['version'], old['version'])
+        self.assertEqual(target['sha256'], old['sha256'])
+        registry, _, manifests = build_feeds.documents(change['after']['plugins'])
+        self.assertEqual(registry['plugins']['minutes']['iconID'], 'camera')
+        self.assertEqual(manifests['minutes']['plugins']['minutes']['descriptor']['iconID'], 'camera')
+
     def test_withdrawal_preserves_asset_and_other_plugins(self):
         before = copy.deepcopy(self.source)
         plan = plugin_lifecycle.plan(self.source, 'minutes', False)

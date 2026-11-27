@@ -103,7 +103,9 @@ struct DeveloperCenterView: View {
         }
         .confirmationDialog("确认发布", isPresented: $confirmingPublish, titleVisibility: .visible) {
             Button("发布", role: .destructive) {
-                let create = model.preview?.repository.exists == false
+                let create = model.preview?.repository.exists == false ||
+                    model.inspection?.action == "new" ||
+                    model.preview?.checks.contains(where: { $0.id == "credential" && $0.confirm == true }) == true
                 Task { await model.publish(createRepository: create) }
             }
             Button("取消", role: .cancel) {}
@@ -440,6 +442,11 @@ struct DeveloperCenterView: View {
         ]
         if preview.repository.exists == false {
             lines.append("将创建仓库并启用 GitHub Pages，需再次确认。")
+        } else if inspection.action == "new" {
+            lines.append("将检查并启用 GitHub Pages。")
+        }
+        if preview.checks.contains(where: { $0.id == "credential" && $0.confirm == true }) {
+            lines.append("将为此仓库生成短期发布授权。")
         }
         lines.append("发布会写入签名清单与 Registry，失败可恢复或回滚。")
         return lines.joined(separator: "\n")

@@ -224,6 +224,7 @@ struct DevPreview: Decodable, Equatable, Sendable {
         let id: String
         let ok: Bool
         let message: String
+        let confirm: Bool?
     }
     struct Blocker: Decodable, Equatable, Sendable, Identifiable {
         let code: String

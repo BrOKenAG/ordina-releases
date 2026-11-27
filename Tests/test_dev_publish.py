@@ -12,6 +12,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 import zipfile
 from pathlib import Path
@@ -363,6 +364,85 @@ class ContractTests(EngineTestCase):
 
 @patch.dict(os.environ, {'ORDINA_DEV_LAB': '0', 'ORDINA_PLUGIN_LAB': '0'})
 class ProductionAuthorizationTests(unittest.TestCase):
+    def test_pages_setup_never_writes_when_state_is_unknown(self):
+        from types import SimpleNamespace
+        reply = SimpleNamespace(returncode=1, stdout='', stderr='HTTP 403')
+        with patch.object(dp.subprocess, 'run', return_value=reply) as run:
+            with self.assertRaises(dp.Failure):
+                dp.ensure_repository_pages('BrOKenAG/ordina-plugin-new')
+            self.assertEqual(run.call_count, 1)
+        with patch.object(dp.subprocess, 'run', side_effect=subprocess.TimeoutExpired('gh', 30)) as run:
+            with self.assertRaises(dp.Failure):
+                dp.ensure_repository_pages('BrOKenAG/ordina-plugin-new')
+            self.assertEqual(run.call_count, 1)
+
+    def test_pages_setup_is_idempotent_when_already_enabled(self):
+        from types import SimpleNamespace
+        reply = SimpleNamespace(returncode=0, stdout='{}', stderr='')
+        with patch.object(dp.subprocess, 'run', return_value=reply) as run:
+            dp.ensure_repository_pages('BrOKenAG/ordina-plugin-new')
+            self.assertEqual(run.call_count, 1)
+
+    def test_pages_setup_creates_only_after_confirmed_absence(self):
+        from types import SimpleNamespace
+        missing = SimpleNamespace(returncode=1, stdout='', stderr='HTTP 404')
+        success = SimpleNamespace(returncode=0, stdout='{}', stderr='')
+        with patch.object(dp.subprocess, 'run', side_effect=[missing, success]) as run:
+            dp.ensure_repository_pages('BrOKenAG/ordina-plugin-new')
+            self.assertIn('POST', run.call_args_list[1].args[0])
+
+    def test_first_publish_checks_owner_main_and_missing_target(self):
+        from types import SimpleNamespace
+        replies = [SimpleNamespace(returncode=0, stdout='BrOKenAG\n', stderr=''),
+                   SimpleNamespace(returncode=0, stdout='{"permissions":{"push":true}}', stderr=''),
+                   SimpleNamespace(returncode=1, stdout='', stderr='HTTP 404')]
+        with patch.object(dp.subprocess, 'run', side_effect=replies):
+            dp.first_publish_github_check('BrOKenAG/ordina-plugin-new')
+        replies[0].stdout = 'someone-else'
+        with patch.object(dp.subprocess, 'run', side_effect=replies):
+            with self.assertRaises(dp.Failure):
+                dp.first_publish_github_check('BrOKenAG/ordina-plugin-new')
+
+    def test_scoped_first_publish_requires_official_owner_and_main_permission(self):
+        from types import SimpleNamespace
+        options = SimpleNamespace(credentials=None)
+        base = {'developer': 'BrOKenAG', 'expires': int(time.time()) + 3600,
+                'scopes': ['plugin.publish'], 'repositories': ['BrOKenAG/ordina-plugin-other']}
+        with patch.object(dp.dev_credentials, 'load', return_value=(base, 'keychain')), \
+             patch.object(dp, 'first_publish_github_check', side_effect=dp.Failure('auth.github', 'denied')), \
+             patch('feed_signing.envelope_bytes') as sign, patch.object(dp.dev_credentials, 'store_scoped') as store:
+            with self.assertRaises(dp.Failure):
+                dp.issue_first_publish_authorization(options, 'BrOKenAG/ordina-plugin-new')
+            sign.assert_not_called(); store.assert_not_called()
+
+    def test_scoped_first_publish_does_not_grant_other_repositories(self):
+        from types import SimpleNamespace
+        options = SimpleNamespace(credentials=None)
+        base = {'developer': 'BrOKenAG', 'expires': int(time.time()) + 3600,
+                'scopes': ['plugin.publish'], 'repositories': ['BrOKenAG/ordina-plugin-other']}
+        with patch.object(dp.dev_credentials, 'load', return_value=(base, 'keychain')), \
+             patch.object(dp, 'first_publish_github_check'), \
+             patch('feed_signing.envelope_bytes', return_value=b'signed') as sign, \
+             patch.object(dp.dev_credentials, 'store_scoped') as store:
+            dp.issue_first_publish_authorization(options, 'BrOKenAG/ordina-plugin-new')
+            issued = sign.call_args.args[0]
+            self.assertEqual(issued['repositories'], ['BrOKenAG/ordina-plugin-new'])
+            self.assertEqual(set(issued['scopes']), {'plugin.publish', 'plugin.rollback', 'repository.create'})
+            self.assertLessEqual(issued['expires'] - issued['issuedAt'], 1800)
+            store.assert_called_once()
+
+    def test_recovery_refreshes_expired_scoped_authorization_then_rechecks(self):
+        from types import SimpleNamespace
+        options = SimpleNamespace(credentials=None, backend='production')
+        repo = 'BrOKenAG/ordina-plugin-new'
+        with patch.object(dp, 'credential', side_effect=[dp.Failure('auth.expired', 'expired'), ({}, 'keychain-scoped')]) as cred, \
+             patch.object(dp, 'issue_first_publish_authorization') as issue, \
+             patch.object(dp, 'production_authorize') as authorize:
+            dp.authorize_recovery(options, repo)
+            issue.assert_called_once_with(options, repo, allow_create=False)
+            self.assertEqual(cred.call_count, 2)
+            authorize.assert_called_once_with(options, repo)
+
     def test_checks_every_plugin_repository_in_transaction(self):
         with patch.object(dp, 'production_authorize') as authorize:
             dp.authorize_repositories(None, {'BrOKenAG/ordina-releases',

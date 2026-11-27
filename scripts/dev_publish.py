@@ -45,7 +45,7 @@ import publish_plugin
 from release_transaction import LocalGateway, ReleaseError
 
 TOOL = 'ordina-publisher'
-TOOL_VERSION = '1.8.0'
+TOOL_VERSION = '1.9.0'
 PROTOCOL = 1
 MIN_CLIENT = '1.10.0'
 MAX_NOTES = 2000
@@ -390,6 +390,55 @@ def credential(options, repository, scope='plugin.publish'):
     return document, source
 
 
+def first_publish_github_check(repository):
+    """Require the official account, main-repository write and a known target."""
+    if lab_enabled() or env('ORDINA_PLUGIN_LAB') == '1':
+        raise Failure('backend.lab', '隔离环境不能签发生产授权。')
+    import re
+    if not re.fullmatch(r'BrOKenAG/ordina-plugin-[a-z][a-z0-9-]{0,31}', repository or ''):
+        raise Failure('auth.repository', '发布目标不在官方仓库范围。')
+    try:
+        user = subprocess.run(['gh', 'api', 'user', '--jq', '.login'], capture_output=True, text=True, timeout=15)
+        main = subprocess.run(['gh', 'api', 'repos/BrOKenAG/ordina-releases'], capture_output=True, text=True, timeout=15)
+        target = subprocess.run(['gh', 'api', f'repos/{repository}'], capture_output=True, text=True, timeout=15)
+        if user.returncode or user.stdout.strip().lower() != 'brokenag' or main.returncode or json.loads(main.stdout).get('permissions', {}).get('push') is not True:
+            raise ValueError('官方账号或主仓库权限无法确认')
+        if target.returncode:
+            if 'HTTP 404' not in target.stderr and 'Not Found' not in target.stderr:
+                raise ValueError('目标仓库状态无法确认')
+        elif json.loads(target.stdout).get('permissions', {}).get('push') is not True:
+            raise ValueError('目标仓库写入权限无法确认')
+    except (OSError, ValueError, subprocess.SubprocessError) as error:
+        raise Failure('auth.github', '无法确认官方账号及仓库权限。') from error
+
+
+def issue_first_publish_authorization(options, repository, allow_create=True):
+    """After confirmation, issue a short-lived authorization for one target."""
+    if options.credentials or lab_enabled():
+        raise Failure('backend.lab', '仅官方钥匙串授权可用于首次发布。')
+    try:
+        base, source = dev_credentials.load(scope='plugin.publish')
+        if source != 'keychain' or base.get('developer', '').lower() != 'brokenag':
+            raise Failure('auth.signature', '需要有效的官方开发者授权。')
+        first_publish_github_check(repository)
+        now = int(time.time())
+        expiry = min(base['expires'], now + 1740)
+        if expiry <= now:
+            raise Failure('auth.expired', '开发者授权已过期。')
+        scopes = ['plugin.publish', 'plugin.rollback']
+        if allow_create:
+            scopes.append('repository.create')
+        document = {'format': 1, 'developer': base['developer'], 'keyId': dev_credentials.KEY_ID,
+                    'issuedAt': now - 30, 'notBefore': now - 30, 'expires': expiry,
+                    'scopes': scopes, 'repositories': [repository]}
+        from feed_signing import envelope_bytes
+        dev_credentials.store_scoped(envelope_bytes(document).decode(), repository)
+    except dev_credentials.CredentialError as error:
+        raise Failure(error.code, str(error)) from error
+    except (ValueError, OSError, subprocess.SubprocessError) as error:
+        raise Failure('auth.signing', '无法生成可信的临时授权。') from error
+
+
 def production_authorize(options, repository, allow_create=False):
     """Recheck signed delegation, GitHub write permission and pinned signing key."""
     if lab_enabled() or env('ORDINA_PLUGIN_LAB') == '1':
@@ -473,6 +522,26 @@ def repository_steps(slug, name):
     ]
 
 
+def ensure_repository_pages(slug):
+    try:
+        state = subprocess.run(['gh', 'api', f'repos/{slug}/pages'], capture_output=True, text=True, timeout=30)
+    except (OSError, subprocess.SubprocessError) as error:
+        raise Failure('repository.pages', '无法确认 GitHub Pages 状态，请重试。') from error
+    if state.returncode == 0:
+        return
+    if 'HTTP 404' not in state.stderr and 'Not Found' not in state.stderr:
+        raise Failure('repository.pages', '无法确认 GitHub Pages 状态，请重试。')
+    try:
+        pages = subprocess.run(
+            ['gh', 'api', '-X', 'POST', f'repos/{slug}/pages',
+             '-f', 'source[branch]=main', '-f', 'source[path]=/'],
+            capture_output=True, text=True, timeout=30)
+    except (OSError, subprocess.SubprocessError) as error:
+        raise Failure('repository.pages', '无法确认 GitHub Pages 创建结果，请重试。') from error
+    if pages.returncode:
+        raise Failure('repository.pages', '启用 Pages 失败：' + pages.stderr.strip()[:300])
+
+
 def create_repository(slug, name, kind):
     if kind == 'lab':
         (lab_root() / 'lab' / 'assets' / slug).mkdir(parents=True, exist_ok=True)
@@ -484,13 +553,7 @@ def create_repository(slug, name, kind):
     if result.returncode:
         raise Failure('repository.create', '创建仓库失败：' +
                       (result.stderr or result.stdout).strip()[:300])
-    pages = subprocess.run(
-        ['gh', 'api', '-X', 'POST', f'repos/{slug}/pages',
-         '-f', 'source[branch]=main', '-f', 'source[path]=/'],
-        capture_output=True, text=True)
-    if pages.returncode:
-        raise Failure('repository.pages', '启用 Pages 失败：' +
-                      pages.stderr.strip()[:300])
+    ensure_repository_pages(slug)
     return {'created': True, 'slug': slug, 'source': 'github'}
 
 
@@ -573,6 +636,25 @@ def build_preview(options, root):
         credential_error = error
         check('credential', False, str(error))
     state = repository_state(prepared.target['repository'], options.backend)
+    if (credential_error is not None and credential_error.code in ('auth.repository', 'auth.scope')
+            and options.backend == 'production' and inspected['action'] == 'new'
+            and state['exists'] is not None):
+        try:
+            base, source = dev_credentials.load(scope='plugin.publish')
+            if source != 'keychain' or base.get('developer', '').lower() != 'brokenag':
+                raise Failure('auth.signature', '需要有效的官方开发者授权。')
+            first_publish_github_check(prepared.target['repository'])
+            from feed_signing import sign_document
+            sign_document({'purpose': 'ordina-first-publish-preview', 'nonce': secrets.token_hex(32)})
+            checks[-1] = {'id': 'credential', 'ok': True,
+                          'message': '确认后为此仓库生成临时授权', 'confirm': True}
+            credential_error = None
+        except Failure as error:
+            credential_error = error
+        except dev_credentials.CredentialError as error:
+            credential_error = Failure(error.code, str(error))
+        except (ValueError, OSError, subprocess.SubprocessError):
+            credential_error = Failure('auth.signing', '无法验证可信发布签名能力。')
     # Creating a repository for a brand-new plugin is an explicit confirmation
     # (publish --create-repository), not a blocker: the preview lists the exact
     # steps that will run and the fingerprint covers that decision.
@@ -817,12 +899,11 @@ def command_publish(options):
         raise Failure('publish.notes', f'更新说明超过 {MAX_NOTES} 字。')
     inspected = inspect_package(zip_path, options.plugin_id, root)
     slug = inspected['repository']['slug']
-    if options.backend == 'production':
+    if options.backend == 'production' and not options.create_repository:
         production_authorize(options, slug, allow_create=options.create_repository)
     prepared = restrict_feeds(prepare_zip(zip_path, notes, options.plugin_id, root),
                               options.backend)
     slug = prepared.target['repository']
-    credential(options, slug)
     if options.backend == 'production' and not durable_release.lab_report_valid():
         raise Failure('publish.labreport', '缺少有效的隔离环境验证报告，已停止发布。')
     expected = options.expect_fingerprint
@@ -831,6 +912,19 @@ def command_publish(options):
         raise Failure('preview.stale',
                       '安装包或配置在预览之后发生变化，请重新预览后再发布。')
     state = repository_state(slug, options.backend)
+    if state['exists'] is None:
+        raise Failure('auth.github', '无法确认目标仓库状态，请重试。')
+    if options.backend == 'production' and options.create_repository:
+        if not expected or inspected['action'] != 'new':
+            raise Failure('publish.confirm', '首次上架必须先预览并确认。')
+        try:
+            production_authorize(options, slug, allow_create=True)
+        except Failure as error:
+            if error.code not in ('auth.repository', 'auth.scope'):
+                raise
+            issue_first_publish_authorization(options, slug)
+            production_authorize(options, slug, allow_create=True)
+    credential(options, slug)
     if not state['exists']:
         if not options.create_repository:
             raise Failure('repository.missing', f'目标仓库 {slug} 不存在。',
@@ -841,6 +935,8 @@ def command_publish(options):
         create_repository(slug, prepared.name, options.backend)
         if options.backend == 'production':
             production_authorize(options, slug)
+    elif options.backend == 'production' and options.create_repository and inspected['action'] == 'new':
+        ensure_repository_pages(slug)
 
     journal_dir = journal_directory(root, options.journal_dir)
     journal_dir.mkdir(parents=True, exist_ok=True)
@@ -930,17 +1026,26 @@ def command_status(options):
     ok(summary)
 
 
+def authorize_recovery(options, repository):
+    try:
+        credential(options, repository)
+    except Failure as error:
+        if options.backend != 'production' or error.code not in ('auth.repository', 'auth.scope', 'auth.expired'):
+            raise
+        issue_first_publish_authorization(options, repository, allow_create=False)
+        credential(options, repository)
+    if options.backend == 'production':
+        production_authorize(options, repository)
+
+
 def command_resume(options):
     path = load_journal(options.journal)
     summary = journal_summary(path) or {}
     if summary.get('status') == 'complete':
         raise Failure('journal.complete', '该事务已完成，无需恢复。')
     root = environment_repository(required=True)
-    credential(options, summary.get('repository') or
-               f'BrOKenAG/ordina-plugin-{summary.get("plugin")}')
-    if options.backend == 'production':
-        production_authorize(options, summary.get('repository') or
-                             f'BrOKenAG/ordina-plugin-{summary.get("plugin")}')
+    authorize_recovery(options, summary.get('repository') or
+                       f'BrOKenAG/ordina-plugin-{summary.get("plugin")}')
     backend, durable, _ = backend_for_journal(options, path)
     if options.backend == 'production':
         repository = summary.get('repository') or f'BrOKenAG/ordina-plugin-{summary.get("plugin")}'
@@ -967,11 +1072,8 @@ def command_rollback(options):
     if summary.get('status') == 'rolled_back':
         raise Failure('journal.rolledback', '该事务已回滚。')
     root = environment_repository(required=True)
-    credential(options, summary.get('repository') or
-               f'BrOKenAG/ordina-plugin-{summary.get("plugin")}')
-    if options.backend == 'production':
-        production_authorize(options, summary.get('repository') or
-                             f'BrOKenAG/ordina-plugin-{summary.get("plugin")}')
+    authorize_recovery(options, summary.get('repository') or
+                       f'BrOKenAG/ordina-plugin-{summary.get("plugin")}')
     backend, durable, _ = backend_for_journal(options, path)
     if options.backend == 'production':
         repository = summary.get('repository') or f'BrOKenAG/ordina-plugin-{summary.get("plugin")}'

@@ -13,6 +13,17 @@
       "tag": "dev-tool-v1.8.0",
       "url": "https://github.com/BrOKenAG/ordina-releases/releases/download/dev-tool-v1.8.0/ordina-publisher-1.8.0.pyz",
       "notes": ""
+    },
+    {
+      "version": "1.9.0",
+      "protocol": 1,
+      "minClientVersion": "1.10.0",
+      "asset": "ordina-publisher-1.9.0.pyz",
+      "sha256": "a00a51a04f4eca10e3e78fe74ae05de388e07a1966bdb307a4e4826c7d1cb21d",
+      "size": 74273,
+      "tag": "dev-tool-v1.9.0",
+      "url": "https://github.com/BrOKenAG/ordina-releases/releases/download/dev-tool-v1.9.0/ordina-publisher-1.9.0.pyz",
+      "notes": ""
     }
   ]
 }
