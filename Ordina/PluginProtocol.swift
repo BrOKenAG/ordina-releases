@@ -37,6 +37,10 @@ struct PluginDescriptor: Codable, Equatable, Sendable, Identifiable {
     let name: String
     let summary: String
     let symbol: String
+    /// Optional compatibility field: a built-in icon id. Older clients and
+    /// older ZIPs simply omit it; the view falls back to `symbol`.
+    /// Defaulted so every existing constructor stays source-compatible.
+    var iconID: String? = nil
     let version: String
     let minClientVersion: String
     let kind: String
@@ -48,7 +52,7 @@ struct PluginDescriptor: Codable, Equatable, Sendable, Identifiable {
     let utilityScript: String?
 
     enum CodingKeys: String, CodingKey {
-        case id, name, summary, symbol, version, minClientVersion, kind
+        case id, name, summary, symbol, iconID, version, minClientVersion, kind
         case protocolVersion = "protocol"
         case capabilities, supportDirectoryName, nativeMessagingHost, legacyNames
         case utilityScript
@@ -77,13 +81,14 @@ struct PluginRegistryEntry: Decodable, Equatable, Sendable {
     let name: String?
     let summary: String?
     let symbol: String?
+    var iconID: String? = nil
     let version: String?
     let minClientVersion: String?
     let protocolVersion: Int?
     let capabilities: [String]?
 
     enum CodingKeys: String, CodingKey {
-        case repository, feed, downloadPrefix, kind, name, summary, symbol
+        case repository, feed, downloadPrefix, kind, name, summary, symbol, iconID
         case version, minClientVersion, capabilities
         case protocolVersion = "protocol"
     }
@@ -214,6 +219,13 @@ enum PluginProtocol {
         value.range(of: #"^[a-z][a-z0-9.]{0,63}$"#, options: .regularExpression) != nil
     }
 
+    /// Icon ids are optional and never whitelisted here: an unknown id is
+    /// rendered as the default glyph instead of invalidating a signed feed.
+    static func validIconID(_ value: String?) -> Bool {
+        guard let value else { return true }
+        return value.range(of: #"^[a-z][a-z0-9-]{0,31}$"#, options: .regularExpression) != nil
+    }
+
     static func validSupportName(_ value: String) -> Bool {
         value.range(of: #"^[A-Za-z0-9][A-Za-z0-9 ._-]{0,63}$"#, options: .regularExpression) != nil
     }
@@ -288,7 +300,7 @@ enum PluginProtocol {
                   entry.kind == nil || entry.kind == "bundle" || entry.kind == "script",
                   let name = entry.name, !name.isEmpty, name.count <= 64,
                   let summary = entry.summary, !summary.isEmpty, summary.count <= 160,
-                  let symbol = entry.symbol, validSymbol(symbol),
+                  let symbol = entry.symbol, validSymbol(symbol), validIconID(entry.iconID),
                   let version = entry.version, validVersion(version),
                   let minimum = entry.minClientVersion, validVersion(minimum),
                   let capabilities = entry.capabilities, !capabilities.isEmpty,
@@ -316,7 +328,8 @@ enum PluginProtocol {
               (release.kind == nil || release.kind == descriptor.kind),
               !descriptor.name.isEmpty, descriptor.name.count <= 64,
               !descriptor.summary.isEmpty, descriptor.summary.count <= 160,
-              validSymbol(descriptor.symbol), validVersion(descriptor.minClientVersion),
+              validSymbol(descriptor.symbol), validIconID(descriptor.iconID),
+              validVersion(descriptor.minClientVersion),
               !descriptor.capabilities.isEmpty,
               (!descriptor.capabilities.contains(.macOSApplication) || supports(clientVersion: descriptor.minClientVersion, minimum: "1.10.0")),
               Set(descriptor.capabilities).count == descriptor.capabilities.count,

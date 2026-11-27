@@ -46,6 +46,27 @@ struct PluginEnvironment: Sendable {
               disableProxy: false)
     }
 
+    /// A local developer test install is deliberately isolated from the managed
+    /// plugin store. Both its files and its state.json live under
+    /// Developer/LocalTest/Host, so it can never appear as a formally managed
+    /// or published plugin and never overwrites a real user script.
+    static func localTest(home: URL, clientVersion: String) -> PluginEnvironment {
+        let host = home.appendingPathComponent(
+            "Library/Application Support/ordina/Developer/LocalTest/Host", isDirectory: true)
+        let support = host.appendingPathComponent(
+            "Library/Application Support/ordina/Plugins", isDirectory: true)
+        return PluginEnvironment(registryURL: productionRegistry, publicKey: productionPublicKey,
+                                 policy: .production, clientVersion: clientVersion,
+                                 home: host, supportRoot: support,
+                                 cacheFile: support.appendingPathComponent("registry-cache.json"),
+                                 disableProxy: false)
+    }
+
+    static var localTestCurrent: PluginEnvironment {
+        let base = current
+        return localTest(home: base.home, clientVersion: base.clientVersion)
+    }
+
     static func lab(registryURL: URL, host: String, publicKey: Data,
                     home: URL, clientVersion: String) -> PluginEnvironment {
         build(registryURL: registryURL, publicKey: publicKey, policy: .lab(host: host),

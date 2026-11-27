@@ -9,6 +9,7 @@ enum PluginCatalog {
         let name: String
         let summary: String
         let symbol: String
+        let iconID: String?
         let version: String
         let minClientVersion: String
         let capabilities: [PluginCapability]
@@ -17,6 +18,9 @@ enum PluginCatalog {
         let status: PluginInstallStatus
         let error: String?
         var isWithdrawn = false
+        /// A managed record with no entry in the signed registry: a local-only
+        /// install or a leftover test record, never a published plugin.
+        var isLocalOnly = false
 
         var isInstalled: Bool { status.isInstalled }
         var canInstall: Bool { !isWithdrawn && release != nil && descriptor != nil }
@@ -48,6 +52,12 @@ enum PluginCatalog {
         for id in withdrawn where items[id] != nil {
             items[id]?.isWithdrawn = true
         }
+        // Only trust this classification when the signed registry was read.
+        if registryError == nil {
+            for id in items.keys where entries[id] == nil && !withdrawn.contains(id) {
+                items[id]?.isLocalOnly = true
+            }
+        }
         for (id, entry) in entries {
             let installed = items[id]
             items[id] = resolve(id: id, entry: entry, installed: installed,
@@ -66,7 +76,8 @@ enum PluginCatalog {
                                                     environment: environment)
             let status = PluginInstaller.inspect(release.descriptor, environment: environment)
             return Item(id: id, name: release.descriptor.name, summary: release.descriptor.summary,
-                        symbol: release.descriptor.symbol, version: release.version,
+                        symbol: release.descriptor.symbol, iconID: release.descriptor.iconID,
+                        version: release.version,
                         minClientVersion: release.descriptor.minClientVersion,
                         capabilities: release.descriptor.capabilities,
                         descriptor: release.descriptor, release: release,
@@ -77,6 +88,7 @@ enum PluginCatalog {
                         name: entry.name ?? descriptor?.name ?? id,
                         summary: entry.summary ?? descriptor?.summary ?? "",
                         symbol: entry.symbol ?? descriptor?.symbol ?? "puzzlepiece.extension",
+                        iconID: entry.iconID ?? descriptor?.iconID,
                         version: entry.version ?? descriptor?.version ?? "",
                         minClientVersion: entry.minClientVersion ?? descriptor?.minClientVersion ?? "",
                         capabilities: descriptor?.capabilities
@@ -99,6 +111,7 @@ enum PluginCatalog {
             result[id] = Item(id: id, name: record.descriptor.name,
                               summary: record.descriptor.summary,
                               symbol: record.descriptor.symbol,
+                              iconID: record.descriptor.iconID,
                               version: record.version,
                               minClientVersion: record.descriptor.minClientVersion,
                               capabilities: record.descriptor.capabilities,

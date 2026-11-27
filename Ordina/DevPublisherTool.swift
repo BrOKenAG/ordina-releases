@@ -23,7 +23,8 @@ protocol DeveloperPublishing: Sendable {
     func rollback(journal: String, reason: String) async throws -> DevAction
     func history() async throws -> DevHistory
     func lifecyclePlugins() async throws -> [DevLifecyclePlugin]
-    func lifecyclePreview(id: String, published: Bool) async throws -> DevLifecyclePreview
+    func lifecyclePreview(id: String, published: Bool,
+                          iconID: String?, changeIcon: Bool) async throws -> DevLifecyclePreview
     func lifecycleSet(_ preview: DevLifecyclePreview,
                       onEvent: @escaping @Sendable (DevEvent) -> Void) async throws -> DevAction
     func credentialStatus() async throws -> DevCredentialStatus
@@ -54,7 +55,10 @@ struct RemotePublisherService: DeveloperPublishing {
     func rollback(journal: String, reason: String) async throws -> DevAction { throw unavailable() }
     func history() async throws -> DevHistory { throw unavailable() }
     func lifecyclePlugins() async throws -> [DevLifecyclePlugin] { throw unavailable() }
-    func lifecyclePreview(id: String, published: Bool) async throws -> DevLifecyclePreview { throw unavailable() }
+    func lifecyclePreview(id: String, published: Bool,
+                          iconID: String?, changeIcon: Bool) async throws -> DevLifecyclePreview {
+        throw unavailable()
+    }
     func lifecycleSet(_ preview: DevLifecyclePreview,
                       onEvent: @escaping @Sendable (DevEvent) -> Void) async throws -> DevAction { throw unavailable() }
     func credentialStatus() async throws -> DevCredentialStatus { throw unavailable() }
@@ -349,20 +353,26 @@ struct LocalPublisherTool: DeveloperPublishing {
         }.value
     }
 
-    func lifecyclePreview(id: String, published: Bool) async throws -> DevLifecyclePreview {
+    func lifecyclePreview(id: String, published: Bool,
+                          iconID: String?, changeIcon: Bool) async throws -> DevLifecyclePreview {
         try await Task.detached(priority: .userInitiated) {
-            try value(DevLifecyclePreview.self, from: call(["lifecycle-preview", "--plugin-id", id,
-                                                             "--published", published ? "yes" : "no"], timeout: 120))
+            var arguments = ["lifecycle-preview", "--plugin-id", id,
+                             "--published", published ? "yes" : "no"]
+            if changeIcon { arguments += ["--icon-id", iconID ?? "default"] }
+            return try value(DevLifecyclePreview.self, from: call(arguments, timeout: 120))
         }.value
     }
 
     func lifecycleSet(_ preview: DevLifecyclePreview,
                       onEvent: @escaping @Sendable (DevEvent) -> Void) async throws -> DevAction {
         try await Task.detached(priority: .userInitiated) {
-            try value(DevAction.self, from: call(["lifecycle-set", "--plugin-id", preview.id,
-                                                 "--published", preview.published ? "yes" : "no",
-                                                 "--expect-fingerprint", preview.fingerprint, "--execute"],
-                                                timeout: 900, onEvent: onEvent))
+            var arguments = ["lifecycle-set", "--plugin-id", preview.id,
+                             "--published", preview.published ? "yes" : "no",
+                             "--expect-fingerprint", preview.fingerprint, "--execute"]
+            if preview.iconChanged == true {
+                arguments += ["--icon-id", preview.iconID ?? "default"]
+            }
+            return try value(DevAction.self, from: call(arguments, timeout: 900, onEvent: onEvent))
         }.value
     }
 

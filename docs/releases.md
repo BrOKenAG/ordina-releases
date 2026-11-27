@@ -338,3 +338,13 @@ python3 scripts/durable_journal.py --rollback <发布事务记录>
 
 - **软件发布计划修正**：`scripts/publish_app_release.py` 原将 `Plan.latest=False` 硬编码，导致 1.10.0 发布后 `/releases/latest` 仍指向 1.9.6。现改为 `latest=True`，使软件正式发布自动成为 GitHub Latest；工具（`publish_dev_tool.py`）与插件（`publish_plugin.py`）发布不显式设 latest，沿用 `Plan.latest=False`，不抢占 Latest。以 `--dry-run` 复核发布计划正常，未重新发布。
 - **本机清理**：正式 1.10.0/build36（DMG SHA-256 `e7d0af45…`，Sparkle 验签通过）已安装到 `/Applications/ordina.app`，旧版 1.9.4 已移废纸篓。保留官方未修改 1.9.6/build35 DMG（`fa888cce…`）作历史升级基准，不保留解压 App。20 个临时驱动、2 个临时验证目录、真实客户端验证目录、`.build`、14 个历史验收目录、14 个 Sparkle 测试 App 副本均移入废纸篓；Dock / Spotlight / 登录项无旧 App 引用，用户数据与正式配置未动。各验收目录原始证据已归档为 `dist/release-prep-1.10.0/acceptance-evidence-archive-20261127.tar.gz`（114 文件，SHA-256 `4c7f98ca54c5e814727cfe6e552b0b5d320a92c01d6774dfe08b2133d60b420d`）。
+
+### 1.10.1 状态核查与隔离修复（2026-11-27 15:45）
+
+- **只读核查结论（Import YueLiu 未上架）**：线上正式签名 `registry.json` 验签通过，仅含 `minutes 0.4.0`、`multicam 2.1`；`BrOKenAG/ordina-releases` 无 `import-yueliu` Release；`BrOKenAG/ordina-plugin-import-yueliu` 不存在（404）。故线上未发布、未托管。开发者配置的 `repositoryPath` 指向本机验收仓库，正式发布需 GitHub 仓库授权与目标仓库创建，凭据未授权时「发布按钮不可用」与「未发布」结果一致，不是结果误报。
+- **「已安装」假象根因**：`DeveloperCenter.localTest()` 复用 `PluginInstaller.install(..., environment: .current)`，把本地测试版本写入正式托管目录 `Plugins/import-yueliu/state.json`（与 `LocalTest/import-yueliu-2.3.json` 同一时刻），插件目录据此显示「已安装」。未删除任何既有记录。
+- **隔离修复**：新增 `PluginEnvironment.localTest` / `.localTestCurrent`，本地测试的文件与 `state.json` 全部落在 `Developer/LocalTest/Host`，正式托管与本机脚本均不受影响；卸载测试版本同样只清理隔离目录。探针确认两条 state 路径互不重叠，正式记录 mtime 未变。
+- **状态区分**：仅出现在本机托管目录、不在签名 Registry 中的记录标记为「本机记录」，不再显示「已安装」；本机脚本行显示「本机脚本」；「已上架」仍只来自线上签名目录。托管记录只在 `publish` 事务成功（含 postflight 线上核验）后写入。
+- **插件列表布局**：三处行（目录插件、本机脚本、内置 Project Setup）统一复用 `PluginRowTrailing`：状态文字固定 96pt 右对齐，操作槽最小 72pt，省略号固定 28×28，统一 8pt 间距；不使用逐行 offset/padding 补偿。
+- **内置图标库**：`PluginIconLibrary` 提供 24 个 24×24、1.7pt 线宽的线性图标（剪辑、时间线、裁切、转场、多机位、摄影机、字幕、对白、文稿、批注、审阅、评论、波形、录音、音量、音乐、标记、标签、自动化、脚本、批量、导出、校验、默认）。上架信息表单接入网格选择器与实时预览；开发者中心已上架插件可「修改图标」。
+- **兼容与元数据**：`iconID` 为可选字段，写入 `plugin.json`、`PluginDescriptor`、签名 Registry 与逐插件 manifest；旧客户端忽略该键，旧 ZIP 与未知 id 回退默认图标。图标修改复用生命周期事务，只重签目录元数据、不重发 ZIP，凭据、签名、线上核验不变。发布工具源码已支持 `icon-metadata` 与 `lifecycle-* --icon-id`，已分发工具 1.8.0 的资产与版本号保持不变；App 对不支持该能力的旧工具给出明确提示，不静默成功。全模块 Debug/Release typecheck 通过；未发布。

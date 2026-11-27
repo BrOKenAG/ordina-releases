@@ -272,6 +272,7 @@ struct DevLifecyclePlugin: Decodable, Equatable, Sendable, Identifiable {
     let id: String
     let name: String
     let symbol: String
+    var iconID: String? = nil
     let version: String
     let published: Bool
 }
@@ -280,6 +281,8 @@ struct DevLifecyclePreview: Decodable, Equatable, Sendable, Identifiable {
     let id: String
     let name: String
     let symbol: String
+    var iconID: String? = nil
+    var iconChanged: Bool? = nil
     let version: String
     let published: Bool
     let noop: Bool

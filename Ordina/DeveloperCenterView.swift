@@ -16,6 +16,8 @@ struct DeveloperCenterView: View {
     @State private var configuringAuthentication = false
     @State private var confirmingRevoke = false
     @State private var confirmingRevokeTrust = false
+    @State private var editingIcon: DevLifecyclePlugin?
+    @State private var iconDraft: String?
     @Environment(\.dismiss) private var dismiss
     @State private var selectingPackage = false
     @State private var selectingCredential = false
@@ -117,6 +119,32 @@ struct DeveloperCenterView: View {
         .sheet(item: $model.lifecyclePreview) { preview in
             lifecycleConfirmation(preview)
         }
+        .sheet(item: $editingIcon) { plugin in
+            iconSheet(plugin)
+        }
+    }
+
+    private func iconSheet(_ plugin: DevLifecyclePlugin) -> some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("修改图标").font(Paper.font(21).weight(.semibold))
+            Text("只更新签名目录中的图标元数据，不重新打包或上传插件。")
+                .font(Paper.font(12)).foregroundStyle(Paper.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            PluginIconPicker(iconID: $iconDraft)
+            HStack {
+                Spacer()
+                Button("取消") { editingIcon = nil }.buttonStyle(PaperButtonStyle())
+                Button("更新图标") {
+                    let target = plugin
+                    let icon = iconDraft
+                    editingIcon = nil
+                    Task { await model.updateIcon(target, iconID: icon) }
+                }
+                .buttonStyle(PaperButtonStyle(primary: true))
+                .disabled(model.busy)
+            }
+        }
+        .padding(24).frame(width: 440).background(Paper.background)
     }
 
     // MARK: header and footer
@@ -544,7 +572,15 @@ struct DeveloperCenterView: View {
                     VStack(spacing: 0) {
                         ForEach(model.lifecyclePlugins) { plugin in
                             HStack(spacing: 10) {
-                                Image(systemName: plugin.symbol).frame(width: 24).foregroundStyle(Paper.accent)
+                                Group {
+                                    if let icon = PluginIcon.resolve(plugin.iconID) {
+                                        PluginIconGlyph(icon: icon, tint: Paper.accent)
+                                    } else {
+                                        Image(systemName: plugin.symbol)
+                                    }
+                                }
+                                .frame(width: 24, height: 24)
+                                .foregroundStyle(Paper.accent)
                                 VStack(alignment: .leading, spacing: 3) {
                                     Text(plugin.name).font(Paper.font(13).weight(.medium))
                                     Text("v\(plugin.version)").font(Paper.font(11).monospaced()).foregroundStyle(Paper.secondary)
@@ -552,6 +588,13 @@ struct DeveloperCenterView: View {
                                 Spacer()
                                 Text(plugin.published ? "已上架" : "已下架")
                                     .font(Paper.font(12)).foregroundStyle(Paper.secondary)
+                                    .frame(width: 56, alignment: .trailing)
+                                Button("图标…") {
+                                    iconDraft = plugin.iconID
+                                    editingIcon = plugin
+                                }
+                                .buttonStyle(PaperQuietButton())
+                                .disabled(model.busy || model.hasPendingTransaction)
                                 Button(plugin.published ? "下架…" : "重新上架…") {
                                     Task { await model.previewLifecycle(plugin) }
                                 }

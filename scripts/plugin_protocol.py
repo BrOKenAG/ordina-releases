@@ -58,6 +58,14 @@ def valid_symbol(value):
     return isinstance(value, str) and SYMBOL_RE.fullmatch(value) is not None
 
 
+def valid_icon_id(value):
+    """Optional built-in icon id. Unknown ids are rendered as the default
+    glyph by the client, so this only constrains the string shape."""
+    if value is None:
+        return True
+    return isinstance(value, str) and re.fullmatch(r'[a-z][a-z0-9-]{0,31}', value) is not None
+
+
 def valid_support_name(value):
     return isinstance(value, str) and SUPPORT_RE.fullmatch(value) is not None
 
@@ -108,6 +116,9 @@ def descriptor(name, meta, version=None, files=None):
     for key in ('supportDirectoryName', 'nativeMessagingHost'):
         if meta.get(key):
             result[key] = meta[key]
+    # Optional and additive: older clients ignore this key entirely.
+    if meta.get('iconID'):
+        result['iconID'] = meta['iconID']
     if meta.get('legacyNames'):
         result['legacyNames'] = list(meta['legacyNames'])
     for item in files or []:
@@ -127,6 +138,8 @@ def validate_descriptor(name, value):
         problems.append('插件简介不合法')
     if not valid_symbol(value.get('symbol')):
         problems.append('图标标识不合法')
+    if not valid_icon_id(value.get('iconID')):
+        problems.append('内置图标标识不合法')
     if not valid_version(value.get('version')):
         problems.append('版本号不合法')
     if not valid_version(value.get('minClientVersion')):

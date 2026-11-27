@@ -17,6 +17,8 @@ enum PluginPublishing {
         var version = ""
         var summary = ""
         var symbol = "doc.text"
+        /// Compatibility-only: omitted in older ZIPs, unknown ids fall back.
+        var iconID: String? = nil
         var minClientVersion = "1.10.0"
     }
 
@@ -114,6 +116,7 @@ enum PluginPublishing {
             return Info(id: record.descriptor.id, name: record.descriptor.name,
                         version: record.version, summary: record.descriptor.summary,
                         symbol: record.descriptor.symbol,
+                        iconID: record.descriptor.iconID,
                         minClientVersion: record.descriptor.minClientVersion)
         }
     }
@@ -279,7 +282,8 @@ enum PluginPublishing {
             capabilities.append(.chromeUnpackedExtension)
         }
         return PluginDescriptor(id: info.id, name: info.name, summary: info.summary,
-                                symbol: info.symbol, version: info.version,
+                                symbol: info.symbol, iconID: info.iconID,
+                                version: info.version,
                                 minClientVersion: info.minClientVersion, kind: "bundle",
                                 protocolVersion: 2, capabilities: capabilities,
                                 supportDirectoryName: supportName ?? info.id,
@@ -300,6 +304,7 @@ enum PluginPublishing {
         ]
         if let support = descriptor.supportDirectoryName { manifest["supportDirectoryName"] = support }
         if let host = descriptor.nativeMessagingHost { manifest["nativeMessagingHost"] = host }
+        if let iconID = info.iconID { manifest["iconID"] = iconID }
         var declared: [String: Any] = [:]
         for file in files {
             var item: [String: Any] = ["role": file.role]
@@ -364,6 +369,11 @@ enum PluginPublishing {
         guard 1...160 ~= value.summary.count else { throw Failure.invalid("插件简介需为 1–160 个字符。") }
         guard value.symbol.range(of: "^[a-z][a-z0-9.]{0,63}$", options: .regularExpression) != nil else {
             throw Failure.invalid("图标标识格式不正确。")
+        }
+        let icon = value.iconID?.trimmingCharacters(in: .whitespacesAndNewlines)
+        value.iconID = (icon?.isEmpty ?? true) ? nil : icon
+        guard PluginProtocol.validIconID(value.iconID) else {
+            throw Failure.invalid("内置图标标识格式不正确。")
         }
         return value
     }

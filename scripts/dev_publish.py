@@ -51,7 +51,8 @@ MIN_CLIENT = '1.10.0'
 MAX_NOTES = 2000
 STAGES = ('preflight', 'asset', 'gate', 'feeds', 'push', 'postflight')
 FEATURES = ('zip-input', 'local-test', 'preview', 'publish', 'journal',
-            'resume', 'rollback', 'history', 'repository-setup', 'tool-update', 'plugin-lifecycle')
+            'resume', 'rollback', 'history', 'repository-setup', 'tool-update', 'plugin-lifecycle',
+            'icon-metadata')
 
 
 class Failure(Exception):
@@ -1016,8 +1017,9 @@ def lifecycle_preview(options, root):
     if options.published not in ('yes', 'no'):
         raise Failure('lifecycle.action', '请选择下架或重新上架。')
     source = lifecycle_source(options, root)
+    icon = options.icon_id if getattr(options, 'icon_id', None) is not None else plugin_lifecycle.KEEP
     try:
-        change = plugin_lifecycle.plan(source, options.plugin_id, options.published == 'yes')
+        change = plugin_lifecycle.plan(source, options.plugin_id, options.published == 'yes', icon)
     except (ValueError, TypeError) as error:
         raise Failure('lifecycle.invalid', str(error)) from error
     credential(options, change['repository'])
@@ -1026,11 +1028,15 @@ def lifecycle_preview(options, root):
         if not durable_release.lab_report_valid():
             raise Failure('publish.labreport', '缺少有效的隔离环境验证报告。')
     fingerprint = hashlib.sha256(json.dumps({'before': source, 'id': change['id'],
-                                             'published': change['published']},
+                                             'published': change['published'],
+                                             'iconID': change['iconID'] if change['iconChanged']
+                                             else plugin_lifecycle.KEEP},
                                             sort_keys=True, separators=(',', ':')).encode()).hexdigest()
     meta = source['plugins'][change['id']]
     return {'id': change['id'], 'name': meta.get('name') or change['id'],
-            'symbol': meta.get('symbol') or 'puzzlepiece.extension', 'version': change['version'],
+            'symbol': meta.get('symbol') or 'puzzlepiece.extension',
+            'iconID': change['iconID'], 'iconChanged': change['iconChanged'],
+            'version': change['version'],
             'published': change['published'], 'noop': change['noop'], 'fingerprint': fingerprint}
 
 
@@ -1043,6 +1049,7 @@ def command_lifecycle_list(options):
             continue
         result.append({'id': plugin_id, 'name': meta.get('name') or plugin_id,
                        'symbol': meta.get('symbol') or 'puzzlepiece.extension',
+                       'iconID': meta.get('iconID'),
                        'version': meta.get('version') or '', 'published': meta.get('published') is True})
     ok({'plugins': result})
 
@@ -1066,10 +1073,13 @@ def command_lifecycle_set(options):
     if any(item.get('status') not in ('complete', 'rolled_back') for item in all_journals(directory)):
         raise Failure('journal.pending', '存在未完成事务，请先恢复或回滚。')
     source = lifecycle_source(options, root)
-    change = plugin_lifecycle.plan(source, options.plugin_id, options.published == 'yes')
+    icon = options.icon_id if getattr(options, 'icon_id', None) is not None else plugin_lifecycle.KEEP
+    change = plugin_lifecycle.plan(source, options.plugin_id, options.published == 'yes', icon)
     # The preview fingerprint is rechecked after fetching the source for use.
     current = hashlib.sha256(json.dumps({'before': source, 'id': change['id'],
-                                        'published': change['published']}, sort_keys=True,
+                                        'published': change['published'],
+                                        'iconID': change['iconID'] if change['iconChanged']
+                                        else plugin_lifecycle.KEEP}, sort_keys=True,
                                        separators=(',', ':')).encode()).hexdigest()
     if current != options.expect_fingerprint:
         raise Failure('preview.stale', '插件目录已变化，请重新预览。')
@@ -1095,10 +1105,18 @@ def command_lifecycle_set(options):
     durable['expected_heads'] = plugin_lifecycle.verify_transaction(durable, backend)
     directory.mkdir(parents=True, exist_ok=True)
     journal = directory / (tid + '.json')
+    was_published = change['before']['plugins'][change['id']].get('published') is True
+    published_changed = was_published != change['published']
+    if change['iconChanged'] and not published_changed:
+        kind, notes = 'icon', '更新图标'
+    elif change['published']:
+        kind, notes = 'republish', '重新上架'
+    else:
+        kind, notes = 'withdraw', '下架'
     meta = {'format': 1, 'plugin': change['id'], 'name': preview['name'],
             'version': change['version'], 'repository': change['repository'],
             'tag': f'plugin-{change["id"]}-v{change["version"]}',
-            'notes': '重新上架' if change['published'] else '下架',
+            'notes': notes,
             'createdAt': int(time.time()), 'toolVersion': TOOL_VERSION}
     meta_path(journal).write_text(json.dumps(meta, ensure_ascii=False), encoding='utf-8')
     try:
@@ -1112,10 +1130,11 @@ def command_lifecycle_set(options):
         raise Failure('lifecycle.failed', str(error), stage='feeds', journal=journal) from error
     sync_worktree(root)
     append_record(records_path(directory, options.records), {
-        'kind': 'republish' if change['published'] else 'withdraw', 'plugin': change['id'],
+        'kind': kind, 'plugin': change['id'],
         'version': change['version'], 'journal': str(journal), 'status': 'complete'})
     ok({'journal': str(journal), 'status': 'complete', 'plugin': change['id'],
-        'version': change['version'], 'published': change['published']})
+        'version': change['version'], 'published': change['published'],
+        'iconID': change['iconID'], 'iconChanged': change['iconChanged']})
 
 
 def command_auth_authorize(options):
@@ -1201,6 +1220,8 @@ def main():
     parser.add_argument('--zip', help='ZIP 安装包路径')
     parser.add_argument('--plugin-id', help='期望的插件标识（脚本包必填）')
     parser.add_argument('--published', choices=('yes', 'no'))
+    parser.add_argument('--icon-id',
+                        help='内置图标标识；传 default 清除。签名目录元数据更新，不重发 ZIP')
     parser.add_argument('--notes', help='更新说明')
     parser.add_argument('--repo', help='ordina 发布仓库路径')
     parser.add_argument('--journal-dir', help='事务目录')

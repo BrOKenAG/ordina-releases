@@ -262,8 +262,11 @@ extension LocalPublisherTool {
     func lifecyclePluginsBlocking() throws -> [DevLifecyclePlugin] {
         try awaitSync { try await lifecyclePlugins() }
     }
-    func lifecyclePreviewBlocking(id: String, published: Bool) throws -> DevLifecyclePreview {
-        try awaitSync { try await lifecyclePreview(id: id, published: published) }
+    func lifecyclePreviewBlocking(id: String, published: Bool,
+                                  iconID: String? = nil,
+                                  changeIcon: Bool = false) throws -> DevLifecyclePreview {
+        try awaitSync { try await lifecyclePreview(id: id, published: published,
+                                                  iconID: iconID, changeIcon: changeIcon) }
     }
     func lifecycleSetBlocking(_ preview: DevLifecyclePreview) throws -> DevAction {
         try awaitSync { try await lifecycleSet(preview) { _ in } }

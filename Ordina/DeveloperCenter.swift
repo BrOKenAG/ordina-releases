@@ -155,7 +155,8 @@ final class DeveloperCenterModel: ObservableObject {
         phase = .working("正在检查插件状态…")
         error = nil
         do {
-            let preview = try await service.lifecyclePreview(id: plugin.id, published: !plugin.published)
+            let preview = try await service.lifecyclePreview(id: plugin.id, published: !plugin.published,
+                                                             iconID: nil, changeIcon: false)
             if preview.noop {
                 notice = "插件状态未变化。"
                 await refreshLifecycle()
@@ -169,6 +170,33 @@ final class DeveloperCenterModel: ObservableObject {
             apply(error: error)
         }
         busy = false
+    }
+
+    /// Updates only the signed-directory metadata for an already published
+    /// plugin. The ZIP asset is never rebuilt or re-uploaded; the existing
+    /// credential, signature and transaction checks still apply.
+    func updateIcon(_ plugin: DevLifecyclePlugin, iconID: String?) async {
+        guard !busy, !hasPendingTransaction, let service = makeService() else { return }
+        await perform("正在更新图标…") {
+            let info = try await service.hello()
+            guard info.features.contains("icon-metadata") else {
+                throw DevBridgeError.response(
+                    "当前发布工具 \(info.version) 不支持图标元数据更新，请先更新发布工具。")
+            }
+            let preview = try await service.lifecyclePreview(id: plugin.id,
+                                                             published: plugin.published,
+                                                             iconID: iconID, changeIcon: true)
+            if preview.noop {
+                self.notice = "图标未变化。"
+                await self.refreshLifecycle()
+                return
+            }
+            _ = try await service.lifecycleSet(preview) { [weak self] event in
+                Task { @MainActor in self?.apply(event) }
+            }
+            await self.refreshAll()
+            self.notice = "图标已更新：仅更新签名目录元数据，未重发插件包。"
+        }
     }
 
     func confirmLifecycle(_ preview: DevLifecyclePreview) async {
@@ -411,18 +439,22 @@ final class DeveloperCenterModel: ObservableObject {
             let result = try await service.localTest(zip: url)
             let data = try Data(contentsOf: URL(fileURLWithPath: result.bundlePath))
             let files = try PluginProtocol.unpack(data, release: result.release)
-            try PluginInstaller.install(result.release, files: files, environment: .current)
+            // Local test installs use an isolated host root: they never touch
+            // the managed plugin store, the official registry or a real script.
+            let environment = PluginEnvironment.localTestCurrent
+            try PluginInstaller.install(result.release, files: files, environment: environment)
             self.localTestResult = result
-            self.notice = "已在本机安装测试版本 \(result.version)；不会修改线上 Registry。"
+            self.notice = "本地测试版本 \(result.version) 已装入隔离目录；未写入正式托管记录，未上架。"
         }
     }
 
     func uninstallLocalTest() async {
         guard let result = localTestResult else { return }
         await perform("正在卸载测试版本…") {
-            try PluginInstaller.uninstall(result.release.descriptor, environment: .current)
+            try PluginInstaller.uninstall(result.release.descriptor,
+                                          environment: PluginEnvironment.localTestCurrent)
             self.localTestResult = nil
-            self.notice = "测试版本已卸载，用户数据保留。"
+            self.notice = "本地测试版本已卸载；正式托管记录与本机脚本均未改变。"
         }
     }
 

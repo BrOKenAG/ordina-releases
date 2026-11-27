@@ -161,60 +161,70 @@ struct OptionalPluginsView: View {
         VStack(alignment: .leading, spacing: OrdinaTokens.space(6)) {
             HStack(spacing: OrdinaTokens.space(12)) {
                 if inManager {
-                    ResolvePluginLabel(title: item.name, summary: item.summary, symbol: item.symbol)
+                    ResolvePluginLabel(title: item.name, summary: item.summary,
+                                       symbol: item.symbol, iconID: item.iconID)
                 } else {
                     Text(item.name).font(OrdinaTokens.type(14))
                         .help(item.summary)
                 }
                 Spacer(minLength: OrdinaTokens.space(8))
-                if state.installing {
-                    ProgressView().controlSize(.small).tint(OrdinaTokens.accent)
-                        .accessibilityLabel("正在安装 \(item.name)")
-                }
-                Text(state.installing ? "安装中…" : (item.isWithdrawn ? "已下架" : state.status.title))
-                    .font(OrdinaTokens.type(12))
-                    .foregroundStyle(state.status == .current && !state.installing
-                                     ? OrdinaTokens.success : OrdinaTokens.secondary)
-                if item.isWithdrawn && item.isInstalled && !state.installing {
-                    Menu {
-                        Button("在 Finder 中显示") { reveal(item) }
-                        Button("卸载…") { confirmUninstall(item) }
-                    } label: { Image(systemName: "ellipsis").frame(width: 28, height: 28) }
-                    .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
-                    .accessibilityLabel(item.name + " 操作")
-                } else if state.status == .incompatible {
-                    Text("≥ \(item.minClientVersion)")
-                        .font(OrdinaTokens.type(11))
-                        .foregroundStyle(OrdinaTokens.secondary)
-                } else if inManager && state.status == .missing && !state.installing {
-                    Button { install(item) } label: { Image(systemName: "plus") }
-                        .buttonStyle(PaperQuietButton()).help("安装")
-                        .accessibilityLabel("安装 " + item.name)
-                        .disabled(!item.canInstall || state.error != nil)
-                } else if inManager && state.status == .current && !state.installing {
-                    Menu {
-                        Button("在 Finder 中显示") { reveal(item) }
-                        if item.needsBrowserExtension {
-                            Button("准备浏览器扩展") { prepareBrowserExtension(item) }
-                        }
-                        if let onPublish, PluginPublishing.canAuthor(),
-                           PluginPublishing.canPackage(.installed(item.id)) {
-                            Button("上架插件") { onPublish(.installed(item.id)) }
+                PluginRowTrailing(
+                    status: state.installing ? "安装中…"
+                        : (item.isWithdrawn ? "已下架"
+                           : (item.isLocalOnly ? "本机记录" : state.status.title)),
+                    highlighted: state.status == .current && !state.installing
+                        && !item.isWithdrawn && !item.isLocalOnly
+                ) {
+                    if state.installing {
+                        ProgressView().controlSize(.small).tint(OrdinaTokens.accent)
+                            .accessibilityLabel("正在安装 \(item.name)")
+                    } else if state.status == .incompatible {
+                        Text("≥ \(item.minClientVersion)")
+                            .font(OrdinaTokens.type(11))
+                            .foregroundStyle(OrdinaTokens.secondary)
+                    } else if inManager && state.status == .missing {
+                        Button { install(item) } label: { Image(systemName: "plus") }
+                            .buttonStyle(PaperQuietButton()).help("安装")
+                            .accessibilityLabel("安装 " + item.name)
+                            .disabled(!item.canInstall || state.error != nil)
+                    } else if !inManager || state.status == .outdated || state.status == .unmanaged {
+                        Button(state.buttonTitle) { install(item) }
+                            .buttonStyle(PaperButtonStyle(compact: true))
+                            .frame(minHeight: OrdinaTokens.height(36))
+                            .disabled(state.status == .loading
+                                      || state.status == .incompatible || state.error != nil)
+                            .accessibilityLabel("\(state.buttonTitle) \(item.name)")
+                    } else {
+                        EmptyView()
+                    }
+                } menu: {
+                    if item.isWithdrawn && item.isInstalled && !state.installing {
+                        Menu {
+                            Button("在 Finder 中显示") { reveal(item) }
+                            Button("卸载…") { confirmUninstall(item) }
+                        } label: { Image(systemName: "ellipsis").frame(width: 28, height: 28) }
+                        .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
+                        .accessibilityLabel(item.name + " 操作")
+                    } else if inManager && state.status == .current && !state.installing {
+                        Menu {
+                            Button("在 Finder 中显示") { reveal(item) }
+                            if item.needsBrowserExtension {
+                                Button("准备浏览器扩展") { prepareBrowserExtension(item) }
+                            }
+                            if let onPublish, PluginPublishing.canAuthor(),
+                               PluginPublishing.canPackage(.installed(item.id)) {
+                                Button("上架插件") { onPublish(.installed(item.id)) }
+                                Divider()
+                            }
+                            Button("重新安装") { install(item) }
                             Divider()
-                        }
-                        Button("重新安装") { install(item) }
-                        Divider()
-                        Button("卸载…") { confirmUninstall(item) }
-                    } label: { Image(systemName: "ellipsis").frame(width: 28, height: 28) }
-                    .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
-                    .accessibilityLabel(item.name + " 操作")
-                } else if !inManager || (!state.installing && state.status != .loading) {
-                    Button(state.buttonTitle) { install(item) }
-                        .buttonStyle(PaperButtonStyle(compact: true))
-                        .frame(minHeight: OrdinaTokens.height(36))
-                        .disabled(state.installing || state.status == .loading
-                                  || state.status == .incompatible || state.error != nil)
-                        .accessibilityLabel("\(state.buttonTitle) \(item.name)")
+                            Button("卸载…") { confirmUninstall(item) }
+                        } label: { Image(systemName: "ellipsis").frame(width: 28, height: 28) }
+                        .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
+                        .accessibilityLabel(item.name + " 操作")
+                    } else {
+                        EmptyView()
+                    }
                 }
             }
             if let error = state.error {
@@ -315,14 +325,21 @@ private struct ResolvePluginLabel: View {
     let title: String
     let summary: String?
     let symbol: String
+    var iconID: String? = nil
 
     var body: some View {
         HStack(spacing: 12) {
-            Image(systemName: symbol).font(.system(size: 17))
-                .frame(width: 36, height: 36)
-                .background(Paper.surface, in: RoundedRectangle(cornerRadius: 8))
-                .foregroundStyle(Paper.accent)
-                .accessibilityHidden(true)
+            Group {
+                if let icon = PluginIcon.resolve(iconID) {
+                    DoodleIcon(.pluginIcon(icon))
+                } else {
+                    Image(systemName: symbol).font(.system(size: 17))
+                        .foregroundStyle(Paper.accent)
+                }
+            }
+            .frame(width: 36, height: 36)
+            .background(Paper.surface, in: RoundedRectangle(cornerRadius: 8))
+            .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 3) {
                 Text(title).font(Paper.font(14).weight(.medium)).lineLimit(1)
                 if let summary {
@@ -330,6 +347,39 @@ private struct ResolvePluginLabel: View {
                 }
             }
         }.frame(minHeight: 62)
+    }
+}
+
+/// One trailing layout for every plugin row: fixed-width status text, a fixed
+/// action slot and a fixed overflow-menu slot. Rows never compensate with
+/// per-row offsets or extra padding.
+private struct PluginRowTrailing<Action: View, Menu: View>: View {
+    let status: String
+    let highlighted: Bool
+    private let action: () -> Action
+    private let menu: () -> Menu
+
+    init(status: String, highlighted: Bool,
+         @ViewBuilder action: @escaping () -> Action,
+         @ViewBuilder menu: @escaping () -> Menu) {
+        self.status = status
+        self.highlighted = highlighted
+        self.action = action
+        self.menu = menu
+    }
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Text(status)
+                .font(Paper.font(12))
+                .foregroundStyle(highlighted ? OrdinaTokens.success : OrdinaTokens.secondary)
+                .lineLimit(1)
+                .frame(width: 96, alignment: .trailing)
+            action()
+                .frame(minWidth: 72, alignment: .trailing)
+            menu()
+                .frame(width: 28, height: 28)
+        }
     }
 }
 
@@ -383,16 +433,21 @@ struct ResolvePluginsPage: View {
                             HStack {
                                 ResolvePluginLabel(title: script.name, summary: script.summary ?? "Resolve 用户脚本", symbol: "doc.text")
                                 Spacer()
-                                Text("已安装").font(Paper.font(12)).foregroundStyle(Paper.success)
-                                Menu {
-                                    Button("在 Finder 中显示") { NSWorkspace.shared.activateFileViewerSelecting([script.url]) }
-                                    if PluginPublishing.canAuthor() {
-                                        Button("上架插件") { beginPublish(.localScript(script.url)) }
-                                    }
-                                    Button("移出 Resolve…") { removing = script }
-                                } label: { Image(systemName: "ellipsis").frame(width: 28, height: 28) }
-                                .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
-                                .disabled(busy).accessibilityLabel(script.name + " 操作")
+                                // A local script is neither formally managed nor
+                                // published; the label says so explicitly.
+                                PluginRowTrailing(status: "本机脚本", highlighted: false) {
+                                    EmptyView()
+                                } menu: {
+                                    Menu {
+                                        Button("在 Finder 中显示") { NSWorkspace.shared.activateFileViewerSelecting([script.url]) }
+                                        if PluginPublishing.canAuthor() {
+                                            Button("上架插件") { beginPublish(.localScript(script.url)) }
+                                        }
+                                        Button("移出 Resolve…") { removing = script }
+                                    } label: { Image(systemName: "ellipsis").frame(width: 28, height: 28) }
+                                    .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
+                                    .disabled(busy).accessibilityLabel(script.name + " 操作")
+                                }
                             }
                             PaperRule()
                         }
@@ -460,27 +515,41 @@ struct ResolvePluginsPage: View {
         HStack {
             ResolvePluginLabel(title: "Project Setup", summary: "初始化时间线，查看素材归档状态", symbol: "slider.horizontal.3")
             Spacer()
-            if integration == .current {
-                Text("已安装").font(Paper.font(12)).foregroundStyle(Paper.success)
-                Menu {
-                    Button("在 Finder 中显示") {
-                        if let directory = try? OptionalPluginInstaller.scriptDirectory() {
-                            NSWorkspace.shared.activateFileViewerSelecting([directory.appendingPathComponent("Project Setup.py")])
+            PluginRowTrailing(status: integrationStatus, highlighted: integration == .current) {
+                if integration == .missing {
+                    Button(action: installIntegration) { Image(systemName: "plus") }
+                        .buttonStyle(PaperQuietButton()).disabled(busy)
+                        .help("安装").accessibilityLabel("安装 Project Setup")
+                } else if integration == .outdated {
+                    Button("更新", action: installIntegration)
+                        .buttonStyle(PaperButtonStyle(compact: true)).disabled(busy)
+                } else {
+                    EmptyView()
+                }
+            } menu: {
+                if integration == .current {
+                    Menu {
+                        Button("在 Finder 中显示") {
+                            if let directory = try? OptionalPluginInstaller.scriptDirectory() {
+                                NSWorkspace.shared.activateFileViewerSelecting([directory.appendingPathComponent("Project Setup.py")])
+                            }
                         }
-                    }
-                    Button("重新安装", action: installIntegration)
-                } label: { Image(systemName: "ellipsis").frame(width: 28, height: 28) }
-                .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
-                .disabled(busy).accessibilityLabel("Project Setup 操作")
-            } else if integration == .missing {
-                Button(action: installIntegration) { Image(systemName: "plus") }
-                    .buttonStyle(PaperQuietButton()).disabled(busy)
-                    .help("安装").accessibilityLabel("安装 Project Setup")
-            } else if integration == .outdated {
-                Button("更新", action: installIntegration)
-                    .buttonStyle(PaperButtonStyle(compact: true)).disabled(busy)
+                        Button("重新安装", action: installIntegration)
+                    } label: { Image(systemName: "ellipsis").frame(width: 28, height: 28) }
+                    .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
+                    .disabled(busy).accessibilityLabel("Project Setup 操作")
+                } else {
+                    EmptyView()
+                }
             }
         }
+    }
+
+    private var integrationStatus: String {
+        if integration == .current { return "已安装" }
+        if integration == .missing { return "未安装" }
+        if integration == .outdated { return "可更新" }
+        return "检查中…"
     }
 
     private func confirmation(_ title: String, name: String, path: String, action: String,
@@ -579,7 +648,7 @@ private extension ResolvePluginsPage {
             field("插件标识", text: $publishInfo.id)
             field("名称", text: $publishInfo.name)
             field("版本", text: $publishInfo.version)
-            field("图标标识", text: $publishInfo.symbol)
+            PluginIconPicker(iconID: $publishInfo.iconID)
             field("最低客户端", text: $publishInfo.minClientVersion)
             VStack(alignment: .leading, spacing: 4) {
                 Text("简介").font(Paper.font(11)).foregroundStyle(Paper.secondary)

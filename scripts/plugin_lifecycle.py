@@ -10,7 +10,10 @@ from github_lab_backend import GitHubLabMultiBackend
 import plugin_protocol
 
 
-def plan(source, plugin_id, published):
+KEEP = '__keep__'
+
+
+def plan(source, plugin_id, published, icon_id=KEEP):
     if not isinstance(source, dict) or source.get('format') != 2 or \
             not isinstance(source.get('plugins'), dict) or type(published) is not bool:
         raise ValueError('插件状态计划格式无效。')
@@ -30,14 +33,28 @@ def plan(source, plugin_id, published):
             original['sha256'] == '0' * 64 or \
             type(original.get('size')) is not int or original['size'] <= 0:
         raise ValueError('插件已发布资产信息无效。')
+    icon_changed = False
+    if icon_id != KEEP:
+        target_icon = None if icon_id in (None, '', 'default') else icon_id
+        if not plugin_protocol.valid_icon_id(target_icon):
+            raise ValueError('内置图标标识无效。')
+        icon_changed = original.get('iconID') != target_icon
+    else:
+        target_icon = original.get('iconID')
     after = copy.deepcopy(source)
     if original['published'] != published:
         after['plugins'][plugin_id]['published'] = published
         after['plugins'][plugin_id]['everPublished'] = True
+    if icon_changed:
+        if target_icon is None:
+            after['plugins'][plugin_id].pop('iconID', None)
+        else:
+            after['plugins'][plugin_id]['iconID'] = target_icon
     return {'id': plugin_id, 'repository': original['repository'],
             'version': original['version'], 'published': published,
-            'noop': original['published'] == published, 'before': copy.deepcopy(source),
-            'after': after}
+            'iconID': target_icon, 'iconChanged': icon_changed,
+            'noop': original['published'] == published and not icon_changed,
+            'before': copy.deepcopy(source), 'after': after}
 
 
 def prepare_transaction(change, asset, transaction_id):
@@ -67,6 +84,7 @@ def prepare_transaction(change, asset, transaction_id):
             'feeds': {repo: GitHubLabMultiBackend.encode_files(files).decode('ascii')
                       for repo, files in sorted(feeds.items())},
             'lifecycle': {'id': plugin_id, 'published': change['published'],
+                          'iconID': change['iconID'], 'iconChanged': change['iconChanged'],
                           'before': change['before']}}
 
 
@@ -74,7 +92,8 @@ def verify_transaction(transaction, remote):
     """Verify signed desired feeds and remote snapshots before a state change."""
     from feed_signing import verify_envelope
     action = transaction.get('lifecycle') or {}
-    change = plan(action.get('before'), action.get('id'), action.get('published'))
+    icon = action.get('iconID') if action.get('iconChanged') else KEEP
+    change = plan(action.get('before'), action.get('id'), action.get('published'), icon)
     if change['noop']:
         raise ValueError('插件状态未变化。')
     plugin_id, repo = change['id'], change['repository']

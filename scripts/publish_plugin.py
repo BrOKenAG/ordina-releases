@@ -215,6 +215,7 @@ def register_plugin(plugin_id, source):
         'name': meta.get('name'),
         'summary': meta.get('summary'),
         'symbol': meta.get('symbol'),
+        'iconID': meta.get('iconID'),
         'minClientVersion': meta.get('minClientVersion'),
         'protocol': meta.get('protocol', protocol.PROTOCOL),
         'capabilities': meta.get('capabilities'),
@@ -274,7 +275,7 @@ def prepare_release(name, source_path, notes=None, plugins=None, document=None,
         package = plugin_meta(Path(source_path))
         if package['id'] != name:
             raise ValueError('插件包标识与已有插件不一致。')
-        for field in ('name', 'summary', 'symbol', 'minClientVersion', 'protocol',
+        for field in ('name', 'summary', 'symbol', 'iconID', 'minClientVersion', 'protocol',
                       'capabilities', 'supportDirectoryName', 'nativeMessagingHost', 'legacyNames'):
             if field in package:
                 updated_fields[field] = package[field]

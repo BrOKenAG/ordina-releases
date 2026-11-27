@@ -70,7 +70,7 @@ def entry(name, meta):
 def registry_descriptor(name, meta):
     """Presentation fields the client needs before fetching a full manifest."""
     value = protocol.descriptor(name, meta)
-    return {
+    result = {
         'repository': meta['repository'],
         'feed': meta['feed'],
         'downloadPrefix': meta['downloadPrefix'],
@@ -85,6 +85,9 @@ def registry_descriptor(name, meta):
         # The signed per-plugin descriptor retains the full capability set.
         'capabilities': [cap for cap in value['capabilities'] if cap != 'macos.application'] or ['resolve.support'],
     }
+    if value.get('iconID'):
+        result['iconID'] = value['iconID']
+    return result
 
 
 def manifest_entry(name, meta):

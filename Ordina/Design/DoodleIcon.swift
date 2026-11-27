@@ -1,7 +1,8 @@
 import SwiftUI
 
 enum PaperGlyph { case folder, audio, download, verify, pet, check, close, plus, more, chevron, reveal, settings, trash, pause, play, link,
-                         chevronLeft, chevronRight, refresh, alert, minus, turnDown, arrowRight, pluginGrid, sliders }
+                         chevronLeft, chevronRight, refresh, alert, minus, turnDown, arrowRight, pluginGrid, sliders,
+                         pluginIcon(PluginIcon) }
 
 struct DoodleIcon: View {
     let glyph: PaperGlyph
@@ -31,7 +32,7 @@ struct DoodleIcon: View {
         case .minus: "minus.circle"
         case .turnDown: "arrow.turn.down.right"
         case .arrowRight: "arrow.right"
-        case .pluginGrid, .sliders: ""
+        case .pluginGrid, .sliders, .pluginIcon: ""
         }
     }
     @ViewBuilder
@@ -41,14 +42,16 @@ struct DoodleIcon: View {
             PluginGridGlyph().frame(width: 24, height: 24).accessibilityHidden(true)
         case .sliders:
             SlidersGlyph().frame(width: 24, height: 24).accessibilityHidden(true)
+        case .pluginIcon(let icon):
+            PluginIconGlyph(icon: icon)
         default:
             Image(systemName: symbol).resizable().scaledToFit().padding(2).accessibilityHidden(true)
         }
     }
 }
 
-private func strokeGlyph(_ path: Path) -> some View {
-    path.stroke(Paper.secondary, style: StrokeStyle(lineWidth: 1.7, lineCap: .round, lineJoin: .round))
+func strokeGlyph(_ path: Path, tint: Color = Paper.secondary) -> some View {
+    path.stroke(tint, style: StrokeStyle(lineWidth: 1.7, lineCap: .round, lineJoin: .round))
 }
 
 private struct PluginGridGlyph: View {
