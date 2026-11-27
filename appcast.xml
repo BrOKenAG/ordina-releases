@@ -6,6 +6,15 @@ IMPORTANT: This file was signed by Sparkle. Any modifications to this file requi
     <channel>
         <title>ordina</title>
         <item>
+            <title>1.10.0</title>
+            <pubDate>Fri, 27 Nov 2026 12:11:08 +0800</pubDate>
+            <sparkle:version>36</sparkle:version>
+            <sparkle:shortVersionString>1.10.0</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>26.0</sparkle:minimumSystemVersion>
+            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
+            <enclosure url="https://github.com/BrOKenAG/ordina-releases/releases/download/v1.10.0-build.36/ordina-1.10.0-build.36.dmg" length="2809365" type="application/octet-stream" sparkle:edSignature="GvW6hwWQXRemg1OBacaCIjwuETtGpGfj5bkv+6RZfj19EN8whCBSW/GoPDAbUhGij8tfNCF6jdynaD/2eZTsCQ=="/>
+        </item>
+        <item>
             <title>1.9.6</title>
             <pubDate>Tue, 24 Nov 2026 19:09:01 +0800</pubDate>
             <link>https://github.com/BrOKenAG/ordina-releases/releases</link>
@@ -38,6 +47,6 @@ IMPORTANT: This file was signed by Sparkle. Any modifications to this file requi
     </channel>
 </rss>
 <!-- sparkle-signatures:
-edSignature: hLdneisSmh475izqJ0B4TMLC0msQIVaFlyBmYfEBQf0HpG95/b2QKdh7sB45Nk7DlpcdDgRg/Ho0pp50XS1UBg==
-length: 2776
+edSignature: FwbJ6O1yMbTo5l7gYfdIff/WT0uOWX6btG2Av1a9wVe8zVrbwXjAhfFzuatYhZJhz2wgG2vusRL2GnDRcxIPCQ==
+length: 3484
 -->
