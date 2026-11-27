@@ -37,6 +37,10 @@ enum PluginInstallStatus: Equatable, Sendable {
 }
 
 enum PluginInstaller {
+    /// Posted after a successful install/uninstall so every ownership view
+    /// refreshes from the install records instead of relying on file events.
+    static let didChangeNotification = Notification.Name("ordina.pluginInstallDidChange")
+
     enum Failure: LocalizedError, Equatable {
         case newerInstalled
         case incompatible(String)
@@ -79,33 +83,83 @@ enum PluginInstaller {
                                       minimum: descriptor.minClientVersion) else {
             return .incompatible(required: descriptor.minClientVersion)
         }
-        if let installed = state(descriptor.id, environment: environment) {
-            if installed.version == descriptor.version { return .current(version: installed.version) }
-            if PluginProtocol.newer(descriptor.version, than: installed.version) {
-                return .updateAvailable(installed: installed.version, latest: descriptor.version)
-            }
-            return .current(version: installed.version)
-        }
-        // Migration: the pre-protocol Minutes bundle wrote installed.json.
-        if let marker = legacyMarker(descriptor, environment: environment),
-           let version = marker.version {
+        let markerVersion = legacyMarker(descriptor, environment: environment)?.version
+        let components = necessaryComponentsPresent(descriptor, environment: environment)
+
+        func status(for version: String) -> PluginInstallStatus {
             if version == descriptor.version { return .current(version: version) }
             if PluginProtocol.newer(descriptor.version, than: version) {
                 return .updateAvailable(installed: version, latest: descriptor.version)
             }
             return .current(version: version)
         }
-        let utility = utilityTarget(descriptor, environment: environment)
-        if FileManager.default.fileExists(atPath: utility.path) {
-            return .unmanaged(version: nil)
-        }
-        for name in descriptor.legacyNames ?? [] {
-            if FileManager.default.fileExists(atPath: utility.deletingLastPathComponent()
-                .appendingPathComponent(name).path) {
-                return .unmanaged(version: nil)
+
+        // A state record counts only when every recorded component still
+        // exists with the recorded bytes. A stale or partial record must not
+        // report an installed plugin.
+        if let installed = state(descriptor.id, environment: environment) {
+            switch recordIntegrity(installed, environment: environment) {
+            case .intact: return status(for: installed.version)
+            case .altered:
+                if components { return .unmanaged(version: installed.version) }
+            case .partial: break
             }
         }
+        // Legacy installed.json is only a version hint. It never proves a
+        // composite installation on its own: every necessary component must
+        // be present as well.
+        if let version = markerVersion, components { return status(for: version) }
+        if components { return .unmanaged(version: markerVersion) }
         return .notInstalled
+    }
+
+    private enum RecordIntegrity { case intact, altered, partial }
+
+    private static func recordIntegrity(_ record: InstalledPlugin,
+                                        environment: PluginEnvironment) -> RecordIntegrity {
+        guard !record.files.isEmpty else { return .partial }
+        let manager = FileManager.default
+        var altered = false
+        for file in record.files {
+            guard let url = try? checkedPath(home: environment.home, relative: file.target),
+                  let data = try? Data(contentsOf: url) else { continue }
+            if PluginProtocol.digest(data) != file.sha256 { altered = true }
+        }
+        let present = record.files.allSatisfy { file in
+            guard let url = try? checkedPath(home: environment.home, relative: file.target) else { return false }
+            return manager.fileExists(atPath: url.path)
+        }
+        if !present { return .partial }
+        return altered ? .altered : .intact
+    }
+
+    /// Necessary components are derived from signed capabilities, never from a
+    /// plugin name or a single residual file. Every kind of plugin must at
+    /// least have its utility script; each declared capability adds its own
+    /// required target. This is shared by installation status and takeover.
+    static func necessaryComponentsPresent(_ descriptor: PluginDescriptor,
+                                           environment: PluginEnvironment) -> Bool {
+        let manager = FileManager.default
+        guard manager.fileExists(atPath: utilityTarget(descriptor, environment: environment).path)
+        else { return false }
+        guard let support = supportDirectory(descriptor, environment: environment) else { return false }
+        if descriptor.capabilities.contains(.resolveSupport) {
+            guard let contents = try? manager.contentsOfDirectory(atPath: support.path),
+                  !contents.isEmpty else { return false }
+        }
+        if descriptor.capabilities.contains(.chromeNativeMessagingHost),
+           let host = descriptor.nativeMessagingHost {
+            guard manager.fileExists(atPath: support.appendingPathComponent(host).path) else { return false }
+        }
+        if descriptor.capabilities.contains(.chromeUnpackedExtension) {
+            guard manager.fileExists(atPath: support.appendingPathComponent("extension/manifest.json").path)
+            else { return false }
+        }
+        if descriptor.capabilities.contains(.macOSApplication) {
+            let apps = (try? manager.contentsOfDirectory(atPath: support.path)) ?? []
+            guard apps.contains(where: { $0.hasSuffix(".app") }) else { return false }
+        }
+        return true
     }
 
     static func install(_ release: PluginRelease, files: [String: Data],
@@ -341,21 +395,26 @@ enum PluginInstaller {
         }
     }
 
-    // Files this client manages, so a user script with the same name is not
-    // offered as a separate importable script.
-    static func managedNames(environment: PluginEnvironment = .current) -> Set<String> {
-        var names: Set<String> = []
+    // Files this client manages, identified by their recorded home-relative
+    // target path — never by display name. Two unrelated scripts sharing a
+    // name must stay distinguishable, and a takeover must transfer ownership
+    // into the installation record instead of hiding an arbitrary row.
+    static func managedScriptTargets(environment: PluginEnvironment = .current) -> Set<String> {
+        var targets: Set<String> = []
         guard let entries = try? FileManager.default.contentsOfDirectory(
-            at: environment.supportRoot, includingPropertiesForKeys: nil) else { return names }
+            at: environment.supportRoot, includingPropertiesForKeys: nil) else { return targets }
         for directory in entries {
             let id = directory.lastPathComponent
             guard let record = state(id, environment: environment) else { continue }
             for file in record.files where file.role == PluginFileRole.utilityScript.rawValue {
-                names.insert((file.target as NSString).lastPathComponent)
+                targets.insert(file.target)
             }
-            names.formUnion(record.descriptor.legacyNames ?? [])
+            let utilityBase = relative(environment.utilityDirectory, home: environment.home)
+            for name in record.descriptor.legacyNames ?? [] {
+                targets.insert(utilityBase + "/" + name)
+            }
         }
-        return names
+        return targets
     }
 
     static func supportDirectory(_ descriptor: PluginDescriptor,

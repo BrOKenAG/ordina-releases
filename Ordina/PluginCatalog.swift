@@ -131,6 +131,7 @@ enum PluginOperations {
         guard verified == release else { throw PluginProtocol.Failure.unavailable }
         let files = try PluginUpdates.files(for: release, environment: environment)
         try PluginInstaller.install(release, files: files, environment: environment)
+        NotificationCenter.default.post(name: PluginInstaller.didChangeNotification, object: item.id)
     }
 
     static func uninstall(_ item: PluginCatalog.Item,
@@ -139,5 +140,6 @@ enum PluginOperations {
             throw PluginProtocol.Failure.notPublished
         }
         try PluginInstaller.uninstall(descriptor, environment: environment)
+        NotificationCenter.default.post(name: PluginInstaller.didChangeNotification, object: descriptor.id)
     }
 }

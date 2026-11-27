@@ -191,23 +191,35 @@ struct VerifyPluginInstaller {
                     "retry did not install")
         try PluginInstaller.uninstall(descriptor11, environment: environment)
 
-        // Legacy marker migration: installed.json at 0.9.0 offers an update.
+        // A legacy marker alone is only a residual record: without the
+        // plugin's necessary components the bundle is not installed.
         let legacySupport = home.appendingPathComponent("Library/Application Support/Demo Notes")
         try manager.createDirectory(at: legacySupport, withIntermediateDirectories: true)
         try Data("{\"id\":\"demo\",\"version\":\"0.9.0\"}".utf8)
             .write(to: legacySupport.appendingPathComponent("installed.json"))
         try require(PluginInstaller.inspect(descriptor, environment: environment)
+                    == .notInstalled, "residual marker must not report installed")
+
+        // Legacy marker migration only when every necessary component exists.
+        try manager.createDirectory(at: utility, withIntermediateDirectories: true)
+        try Data("PLUGIN_VERSION = \"v0.9.0\"\n".utf8)
+            .write(to: utility.appendingPathComponent("demo.py"))
+        try Data("# host\n".utf8).write(to: legacySupport.appendingPathComponent("host.command"))
+        try manager.createDirectory(at: legacySupport.appendingPathComponent("extension"),
+                                    withIntermediateDirectories: true)
+        try Data("{}".utf8).write(to: legacySupport.appendingPathComponent("extension/manifest.json"))
+        try require(PluginInstaller.inspect(descriptor, environment: environment)
                     == .updateAvailable(installed: "0.9.0", latest: "1.0.0"),
                     "legacy marker migration not detected")
 
-        // Legacy file name migration (non-ASCII) and backup.
+        // Legacy file name migration (non-ASCII) and backup. One residual
+        // script never makes a composite plugin "installed (unmanaged)".
         try manager.removeItem(at: legacySupport.appendingPathComponent("installed.json"))
-        try manager.createDirectory(at: utility, withIntermediateDirectories: true)
         let legacy = utility.appendingPathComponent("旧名.py")
         try Data("# legacy\n".utf8).write(to: legacy)
         let legacyDescriptor = makeDescriptor(legacy: ["旧名.py"])
         try require(PluginInstaller.inspect(legacyDescriptor, environment: environment)
-                    == .unmanaged(version: nil), "legacy file should be unmanaged")
+                    == .unmanaged(version: nil), "complete legacy bundle should be unmanaged")
         try PluginInstaller.install(release(legacyDescriptor, files), files: data,
                                     environment: environment)
         try require(!manager.fileExists(atPath: legacy.path), "legacy name was not removed")

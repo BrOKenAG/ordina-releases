@@ -115,6 +115,8 @@ struct WorkspaceView: View {
     @State private var showingProjects = false
     @State private var settings = false
     @State private var showingPlugins = false
+    @State private var showingDeveloper = false
+    @State private var publishLaunch: PluginPublishing.Launch?
     @State private var showProjectsAfterSettings = false
     @State private var checkUpdatesAfterSettings = false
     @State private var search = ""
@@ -169,7 +171,16 @@ struct WorkspaceView: View {
             WorkspaceSettingsView(requestUpdateCheck: { checkUpdatesAfterSettings = true },
                                   requestProjects: { showProjectsAfterSettings = true })
         }
-        .sheet(isPresented: $showingPlugins) { ResolvePluginsPage() }
+        .sheet(isPresented: $showingPlugins) {
+            ResolvePluginsPage { launch in
+                showingPlugins = false
+                publishLaunch = launch
+                showingDeveloper = true
+            }
+        }
+        .sheet(isPresented: $showingDeveloper, onDismiss: { publishLaunch = nil }) {
+            DeveloperCenterView(launch: publishLaunch)
+        }
         .onReceive(NotificationCenter.default.publisher(for: .ordinaOpenSettings)) { _ in settings = true }
         .onReceive(NotificationCenter.default.publisher(for: .ordinaFocusCreation)) { _ in showingProjects = false }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
@@ -256,6 +267,7 @@ struct WorkspaceSettingsView: View {
     @State private var showingPlugins = false
     @State private var versionClicks = 0
     @State private var showingDeveloper = false
+    @State private var publishLaunch: PluginPublishing.Launch?
     @State private var interval = ""
     @State private var intervalError = ""
     @Environment(\.dismiss) private var dismiss
@@ -385,8 +397,16 @@ struct WorkspaceSettingsView: View {
         }
         .frame(width: 620, height: 640).background(Paper.background).foregroundStyle(Paper.ink).tint(Paper.accent)
         .sheet(isPresented: $editing) { WorkflowTemplateEditor(manager: templates) }
-        .sheet(isPresented: $showingPlugins) { ResolvePluginsPage() }
-        .sheet(isPresented: $showingDeveloper) { DeveloperCenterView() }
+        .sheet(isPresented: $showingPlugins) {
+            ResolvePluginsPage { launch in
+                showingPlugins = false
+                publishLaunch = launch
+                showingDeveloper = true
+            }
+        }
+        .sheet(isPresented: $showingDeveloper, onDismiss: { publishLaunch = nil }) {
+            DeveloperCenterView(launch: publishLaunch)
+        }
         .sheet(isPresented: $showingLibraries) {
             ResolveLibraryPicker(databases: workspace.databases, selection: databaseID, connectedID: workspace.activeDatabaseID,
                                  checking: workspace.checking, error: workspace.resolveError,

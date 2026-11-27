@@ -41,9 +41,17 @@ checks = {
     'VerifyOptionalPlugins': ['ResolveService', 'PluginProtocol', 'PluginEnvironment',
                               'PluginInstaller', 'OptionalPluginInstaller'],
     'VerifyOnboarding': ['ResolveService', 'DestinationBookmark', 'IntegrationInstaller', 'OnboardingState'],
-    'VerifyDeveloperCenter': ['PluginProtocol', 'PluginEnvironment', 'PluginUpdates',
-                              'PluginInstaller', 'DeveloperBridge', 'DevPublisherTool',
-                              'DevToolManager', 'DeveloperCenter'],
+    'VerifyDeveloperCenter': ['ResolveService', 'PluginProtocol', 'PluginEnvironment',
+                              'PluginUpdates', 'PluginInstaller', 'OptionalPluginInstaller',
+                              'DeveloperBridge', 'DevPublisherTool', 'DevToolManager',
+                              'DeveloperAuthentication', 'DeveloperAuthState',
+                              'DeveloperAuthKeychain', 'DeveloperTOTP', 'PluginPublishing',
+                              'DeveloperCenter'],
+    'VerifyPluginPublishing': ['ResolveService', 'PluginProtocol', 'PluginEnvironment',
+                               'PluginUpdates', 'PluginInstaller', 'OptionalPluginInstaller',
+                               'DeveloperBridge', 'DevPublisherTool', 'DevToolManager',
+                               'DeveloperAuthentication', 'DeveloperAuthState',
+                               'DeveloperAuthKeychain', 'DeveloperTOTP', 'PluginPublishing'],
 }
 with tempfile.TemporaryDirectory(prefix='ordina-verification-') as temporary:
     for name, sources in checks.items():

@@ -325,6 +325,13 @@ python3 scripts/durable_journal.py --rollback <发布事务记录>
 - **GitHub Latest 修正**：1.10.0 发布时软件通道 `latest=False`，导致 `/releases/latest` 仍指向 1.9.6（35）。收尾用 `gh release edit v1.10.0-build.36 --repo BrOKenAG/ordina-releases --latest` 修正；API 核验 Latest 现为 `v1.10.0-build.36`。此操作仅改 Release 标记，未触碰任何发布资产。
 - **更新发现结论**：Sparkle 2.10.1 源码 `SPUDownloadDriver.m` 对 appcast 使用 `NSURLRequestReloadIgnoringLocalCacheData`，每次检查忽略本地缓存，陈旧 NSURLCache 不影响普通用户；此前「陈旧缓存致提示最新版」判断不成立。真正诱因是被误设为 build36 的测试客户端（与 1.10.0 版本号相等），已恢复其原始 build36。
 
+### 1.10.1 修复准备（未发布）
+
+- 四项 1.10.0 问题已按共用机制修复：Registry/清单底层错误透传、GUI 发布工具 PATH 补全、复合插件按全部必要组件与完整安装记录判断状态、失败不再伪造托管状态、本机脚本按记录路径去重并在安装后刷新。
+- 新增「从已安装插件直接上架」：本机脚本及状态完整的已安装插件可选择「上架插件」；从实际安装路径收集协议声明的必要文件与依赖，生成标准 ZIP，填写发布信息后进入开发者中心，经 TOTP、发布工具凭据、Ed25519 签名及现有六阶段事务发布；成功后写入托管记录并消除本机列表重复。仅打包已记录文件，拒绝缓存/密钥等路径；缺件时明确列出缺失项且不生成包。支持新插件首次上架与已有插件版本更新。
+- 版本号改为 1.10.1/build37；未构建、未签名、未发布、未推送。
+- **Release 构建阻塞（2026-11-27 15:04）**：关闭 agent 沙盒后运行 `SWIFTPM_DISABLE_SANDBOX=1 python3 scripts/build_app.py --output dist/ordina.app`，`xcodebuild` 仍在 Resolve Package Graph 阶段报 `sandbox-exec: sandbox_apply: Operation not permitted`；失败证据见 `/var/folders/tz/n86m0_5s4yv2d5w0tpbp4rch0000gn/T/ResultBundle_2026-27-11_15-04-0003.xcresult`。须在 macOS 原生「终端」或 Xcode.app 内执行 `bash scripts/local_xcode_build.sh --release` 完成真实构建、签名与 App 验收；本会话不生成替代构建，不发布。
+
 ### 收尾：GitHub Latest 计划修复与清理
 
 - **软件发布计划修正**：`scripts/publish_app_release.py` 原将 `Plan.latest=False` 硬编码，导致 1.10.0 发布后 `/releases/latest` 仍指向 1.9.6。现改为 `latest=True`，使软件正式发布自动成为 GitHub Latest；工具（`publish_dev_tool.py`）与插件（`publish_plugin.py`）发布不显式设 latest，沿用 `Plan.latest=False`，不抢占 Latest。以 `--dry-run` 复核发布计划正常，未重新发布。

@@ -192,6 +192,16 @@ struct LocalPublisherTool: DeveloperPublishing {
         var values: [String: String] = [
             "ORDINA_DEV_CLIENT_VERSION": DevBridge.clientVersion,
         ]
+        // GUI-launched apps inherit launchd's PATH, which omits Homebrew.
+        // The publisher shells out to `gh` for read-only authority checks;
+        // give every invocation the standard CLI locations without altering
+        // credentials, backend selection or any authorization decision.
+        let inherited = ProcessInfo.processInfo.environment["PATH"] ?? ""
+        var search = inherited.split(separator: ":").map(String.init)
+        for directory in ["/opt/homebrew/bin", "/usr/local/bin"] where !search.contains(directory) {
+            search.append(directory)
+        }
+        values["PATH"] = search.joined(separator: ":")
         if !configuration.repositoryPath.isEmpty {
             values["ORDINA_DEV_REPO"] = configuration.repositoryPath
         }

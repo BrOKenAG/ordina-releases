@@ -92,6 +92,8 @@ final class DeveloperCenterModel: ObservableObject {
     @Published var checkingTool = false
 
     private var service: DeveloperPublishing?
+    private var pendingPublish: PluginPublishing.Launch?
+    private var consumedLaunch = false
 
     init(configuration: DeveloperConfiguration = DeveloperDefaults.load()) {
         self.configuration = configuration
@@ -360,6 +362,17 @@ final class DeveloperCenterModel: ObservableObject {
     /// an explicit "移出") must not leave the previous ZIP, inspection, notes
     /// or progress list on screen. Records and the installed local test build
     /// are independent of the selected package and deliberately stay intact.
+    /// A plugin launched from the installed-files list is already packaged.
+    /// It is inspected only after the developer centre is unlocked, so no
+    /// release action can happen outside the authenticated view.
+    func consumeLaunch(_ launch: PluginPublishing.Launch) async {
+        guard !consumedLaunch else { return }
+        consumedLaunch = true
+        pendingPublish = launch
+        clearPackage()
+        await choosePackage(launch.prepared.zip)
+    }
+
     func clearPackage() {
         packageURL = nil
         inspection = nil
@@ -439,6 +452,16 @@ final class DeveloperCenterModel: ObservableObject {
                 }
             lastJournal = result.journal
             notice = "已发布 \(result.plugin) \(result.version)"
+            if let pendingPublish {
+                do {
+                    try PluginPublishing.recordPublished(pendingPublish.prepared)
+                    notice = (notice ?? "") + "；已建立本机托管记录"
+                } catch {
+                    self.error = "发布成功，但建立本机托管记录失败：\(error.localizedDescription)"
+                }
+                PluginPublishing.discard(pendingPublish.prepared)
+                self.pendingPublish = nil
+            }
             // Success closes the release flow: back to the drop zone, with the
             // confirmation kept in the footer notice.
             clearPackage()

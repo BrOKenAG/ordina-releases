@@ -80,11 +80,11 @@ private final class PluginCenterModel: ObservableObject {
             requests[item.id] = nil
             await load(silent: true)
             if let error {
-                var failed = rows[item.id] ?? PluginRowState()
-                failed.installing = false
-                failed.error = error
-                failed.status = .unmanaged
-                rows[item.id] = failed
+                // load() above has already refreshed the row from the real
+                // installation state. A failed action must never fabricate
+                // "已安装（未托管）" for an uninstalled plugin.
+                rows[item.id]?.installing = false
+                rows[item.id]?.error = error
             } else {
                 rows[item.id]?.installing = false
                 onSuccess?()
@@ -111,6 +111,7 @@ private final class PluginCenterModel: ObservableObject {
 struct OptionalPluginsView: View {
     var inManager = false
     var refreshRevision = 0
+    var onPublish: ((PluginPublishing.Source) -> Void)? = nil
     @State private var expanded = false
     @StateObject private var model = PluginCenterModel()
 
@@ -195,6 +196,11 @@ struct OptionalPluginsView: View {
                         Button("在 Finder 中显示") { reveal(item) }
                         if item.needsBrowserExtension {
                             Button("准备浏览器扩展") { prepareBrowserExtension(item) }
+                        }
+                        if let onPublish, PluginPublishing.canAuthor(),
+                           PluginPublishing.canPackage(.installed(item.id)) {
+                            Button("上架插件") { onPublish(.installed(item.id)) }
+                            Divider()
                         }
                         Button("重新安装") { install(item) }
                         Divider()
@@ -327,10 +333,20 @@ private struct ResolvePluginLabel: View {
     }
 }
 
+private struct PublishDraft: Identifiable {
+    let id = UUID()
+    let source: PluginPublishing.Source
+}
+
 @MainActor
 struct ResolvePluginsPage: View {
+    var onPublish: (PluginPublishing.Launch) -> Void = { _ in }
     @Environment(\.dismiss) private var dismiss
     @State private var selecting = false
+    @State private var publishDraft: PublishDraft?
+    @State private var publishInfo = PluginPublishing.Info()
+    @State private var publishError = ""
+    @State private var packaging = false
     @State private var targeted = false
     @State private var importRequest: OptionalPluginInstaller.Import?
     @State private var removing: OptionalPluginInstaller.LocalScript?
@@ -360,7 +376,7 @@ struct ResolvePluginsPage: View {
                     sectionTitle("ordina 内置")
                     integrationRow
                     PaperRule()
-                    OptionalPluginsView(inManager: true, refreshRevision: revision)
+                    OptionalPluginsView(inManager: true, refreshRevision: revision) { beginPublish(.installed($0)) }
                     if !localScripts.isEmpty {
                         sectionTitle("本机脚本").padding(.top, 18)
                         ForEach(localScripts) { script in
@@ -370,6 +386,9 @@ struct ResolvePluginsPage: View {
                                 Text("已安装").font(Paper.font(12)).foregroundStyle(Paper.success)
                                 Menu {
                                     Button("在 Finder 中显示") { NSWorkspace.shared.activateFileViewerSelecting([script.url]) }
+                                    if PluginPublishing.canAuthor() {
+                                        Button("上架插件") { beginPublish(.localScript(script.url)) }
+                                    }
                                     Button("移出 Resolve…") { removing = script }
                                 } label: { Image(systemName: "ellipsis").frame(width: 28, height: 28) }
                                 .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
@@ -423,7 +442,13 @@ struct ResolvePluginsPage: View {
                 perform { try OptionalPluginInstaller.removeLocalScript(script) }
             }
         }
+        .sheet(item: $publishDraft) { draft in
+            publishForm(draft)
+        }
         .task { await watchScripts() }
+        .onReceive(NotificationCenter.default.publisher(for: PluginInstaller.didChangeNotification)) { _ in
+            Task { await refresh() }
+        }
     }
 
     private func sectionTitle(_ title: String) -> some View {
@@ -529,6 +554,76 @@ struct ResolvePluginsPage: View {
             try? await Task.sleep(for: .milliseconds(120))
             guard !Task.isCancelled else { return }
             await refresh()
+        }
+    }
+}
+
+private extension ResolvePluginsPage {
+    func beginPublish(_ source: PluginPublishing.Source) {
+        guard PluginPublishing.canAuthor() else { return }
+        do {
+            publishInfo = try PluginPublishing.suggestedInfo(source)
+            publishError = ""
+            publishDraft = PublishDraft(source: source)
+        } catch {
+            self.error = error.localizedDescription
+        }
+    }
+
+    func publishForm(_ draft: PublishDraft) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("上架插件").font(Paper.font(21).weight(.semibold))
+            Text("将从实际安装路径收集必要文件并生成标准 ZIP；发布信息确认后进入开发者中心完成认证、签名和发布事务。")
+                .font(Paper.font(12)).foregroundStyle(Paper.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            field("插件标识", text: $publishInfo.id)
+            field("名称", text: $publishInfo.name)
+            field("版本", text: $publishInfo.version)
+            field("图标标识", text: $publishInfo.symbol)
+            field("最低客户端", text: $publishInfo.minClientVersion)
+            VStack(alignment: .leading, spacing: 4) {
+                Text("简介").font(Paper.font(11)).foregroundStyle(Paper.secondary)
+                TextEditor(text: $publishInfo.summary)
+                    .font(Paper.font(12)).frame(height: 52)
+                    .overlay { RoundedRectangle(cornerRadius: 6).strokeBorder(Paper.rule, lineWidth: 0.8) }
+            }
+            if !publishError.isEmpty {
+                Text(publishError).font(Paper.font(12)).foregroundStyle(Paper.error)
+                    .textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+            }
+            HStack {
+                Spacer()
+                Button("取消") { publishDraft = nil }.buttonStyle(PaperButtonStyle())
+                Button("生成并继续") { package(draft) }
+                    .buttonStyle(PaperButtonStyle(primary: true)).disabled(packaging)
+            }
+        }.padding(24).frame(width: 480).background(Paper.background)
+    }
+
+    func field(_ title: String, text: Binding<String>) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(title).font(Paper.font(11)).foregroundStyle(Paper.secondary)
+            TextField("", text: text).font(Paper.font(12)).textFieldStyle(.roundedBorder)
+        }
+    }
+
+    func package(_ draft: PublishDraft) {
+        guard !packaging else { return }
+        packaging = true
+        publishError = ""
+        let info = publishInfo
+        Task {
+            do {
+                let prepared = try await Task.detached(priority: .utility) {
+                    try PluginPublishing.prepare(info, source: draft.source)
+                }.value
+                publishDraft = nil
+                packaging = false
+                onPublish(PluginPublishing.Launch(prepared: prepared))
+            } catch {
+                publishError = error.localizedDescription
+                packaging = false
+            }
         }
     }
 }

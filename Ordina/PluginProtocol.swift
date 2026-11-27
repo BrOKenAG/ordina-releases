@@ -122,6 +122,10 @@ enum PluginProtocol {
     enum Failure: LocalizedError, Equatable {
         case invalid
         case unavailable
+        // Carries the concrete transport/verification cause so callers can
+        // report what actually failed instead of collapsing every failure
+        // into the same generic "无法获取插件目录" line.
+        case detail(String)
         case notPublished
         case unsupportedClient
         case incompatibleClient(String)
@@ -131,6 +135,7 @@ enum PluginProtocol {
             switch self {
             case .invalid: return "插件清单校验失败。"
             case .unavailable: return "无法获取插件目录。"
+            case .detail(let cause): return cause
             case .notPublished: return "暂无在线版本。"
             case .unsupportedClient: return "插件协议版本高于当前客户端。"
             case .incompatibleClient(let version): return "需要 ordina \(version) 或更高版本。"
@@ -172,13 +177,28 @@ enum PluginProtocol {
     static let maximumNativeFile = 16_000_000
 
     static func verifiedPayload(_ data: Data, publicKey: Data) throws -> Data {
-        guard data.count <= maximumManifest else { throw Failure.invalid }
-        let envelope = try JSONDecoder().decode(Envelope.self, from: data)
+        guard data.count <= maximumManifest else {
+            throw Failure.detail("目录内容超过 \(maximumManifest) 字节上限。")
+        }
+        let envelope: Envelope
+        do {
+            envelope = try JSONDecoder().decode(Envelope.self, from: data)
+        } catch {
+            throw Failure.detail("目录信封 JSON 解析失败：\(error.localizedDescription)")
+        }
         guard let payload = Data(base64Encoded: envelope.payload),
-              payload.count <= maximumManifest,
-              let signature = Data(base64Encoded: envelope.signature),
-              let key = try? Curve25519.Signing.PublicKey(rawRepresentation: publicKey),
-              key.isValidSignature(signature, for: payload) else { throw Failure.invalid }
+              payload.count <= maximumManifest else {
+            throw Failure.detail("目录 payload Base64 解码失败或超过大小上限。")
+        }
+        guard let signature = Data(base64Encoded: envelope.signature) else {
+            throw Failure.detail("目录签名 Base64 解码失败。")
+        }
+        guard let key = try? Curve25519.Signing.PublicKey(rawRepresentation: publicKey) else {
+            throw Failure.detail("内置公钥格式无效。")
+        }
+        guard key.isValidSignature(signature, for: payload) else {
+            throw Failure.detail("目录 Ed25519 签名校验失败：公钥或内容不匹配。")
+        }
         return payload
     }
 
@@ -246,8 +266,15 @@ enum PluginProtocol {
     static func verifiedRegistrySnapshot(_ data: Data, publicKey: Data,
                                          policy: PluginPolicy) throws -> RegistrySnapshot {
         let payload = try verifiedPayload(data, publicKey: publicKey)
-        let document = try JSONDecoder().decode(RegistryPayload.self, from: payload)
-        guard document.format == 2 else { throw Failure.invalid }
+        let document: RegistryPayload
+        do {
+            document = try JSONDecoder().decode(RegistryPayload.self, from: payload)
+        } catch {
+            throw Failure.detail("目录协议 JSON 解析失败：\(error.localizedDescription)")
+        }
+        guard document.format == 2 else {
+            throw Failure.detail("目录协议格式不受支持：format=\(document.format)，需要 2。")
+        }
         let withdrawn = document.withdrawn ?? []
         guard withdrawn.count <= 1000, Set(withdrawn).count == withdrawn.count,
               withdrawn.allSatisfy({ validID($0) && document.plugins[$0] == nil })

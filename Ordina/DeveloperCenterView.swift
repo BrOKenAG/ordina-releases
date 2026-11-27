@@ -8,7 +8,10 @@ import UniformTypeIdentifiers
 // authorised by the publishing tool's own signed credential check.
 @MainActor
 struct DeveloperCenterView: View {
+    let launch: PluginPublishing.Launch?
     @StateObject private var model = DeveloperCenterModel()
+
+    init(launch: PluginPublishing.Launch? = nil) { self.launch = launch }
     @StateObject private var auth = DeveloperAuthentication()
     @State private var configuringAuthentication = false
     @State private var confirmingRevoke = false
@@ -66,6 +69,10 @@ struct DeveloperCenterView: View {
         .frame(width: 760, height: 720)
         .background(Paper.background).foregroundStyle(Paper.ink)
         .task { auth.load(); await model.load() }
+        .onChange(of: auth.unlocked) { unlocked in
+            guard unlocked, let launch else { return }
+            Task { await model.consumeLaunch(launch) }
+        }
         .onReceive(Timer.publish(every: 1, on: .main, in: .common).autoconnect()) { _ in auth.tick() }
         .onDisappear { auth.lock() }
         .confirmationDialog("撤销本机认证？", isPresented: $confirmingRevoke, titleVisibility: .visible) {

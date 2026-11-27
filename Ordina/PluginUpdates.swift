@@ -35,7 +35,9 @@ enum PluginUpdates {
                 memoryCache[key] = (Date(), cached)
                 return cached
             }
-            throw PluginProtocol.Failure.unavailable
+            // Preserve the concrete transport cause (HTTP status, timeout,
+            // DNS/proxy error) instead of collapsing it into a generic line.
+            throw error
         }
         let entries = try PluginProtocol.verifiedRegistrySnapshot(
             data, publicKey: environment.publicKey, policy: environment.policy)
@@ -89,17 +91,30 @@ enum PluginUpdates {
 
     private final class BoundedDownload: NSObject, URLSessionDataDelegate, @unchecked Sendable {
         let limit: Int
+        let url: URL
         let done = DispatchSemaphore(value: 0)
         var bytes = Data()
         var accepted = false
         var failure: Error?
-        init(limit: Int) { self.limit = limit }
+        init(limit: Int, url: URL) { self.limit = limit; self.url = url }
+        private func fail(_ reason: String) -> PluginProtocol.Failure {
+            .detail("无法获取 \(url.host ?? url.absoluteString) 的资源：\(reason)")
+        }
         func urlSession(_ session: URLSession, dataTask: URLSessionDataTask,
                         didReceive response: URLResponse,
                         completionHandler: @escaping (URLSession.ResponseDisposition) -> Void) {
-            guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode),
-                  response.expectedContentLength <= Int64(limit) else {
-                failure = PluginProtocol.Failure.unavailable
+            guard let http = response as? HTTPURLResponse else {
+                failure = fail("响应不是 HTTP。")
+                completionHandler(.cancel)
+                return
+            }
+            guard (200...299).contains(http.statusCode) else {
+                failure = fail("HTTP \(http.statusCode)。")
+                completionHandler(.cancel)
+                return
+            }
+            guard response.expectedContentLength <= Int64(limit) else {
+                failure = fail("内容长度 \(response.expectedContentLength) 超过 \(limit) 字节上限。")
                 completionHandler(.cancel)
                 return
             }
@@ -108,20 +123,27 @@ enum PluginUpdates {
         }
         func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive data: Data) {
             guard data.count <= limit - bytes.count else {
-                failure = PluginProtocol.Failure.unavailable
+                failure = fail("下载内容超过 \(limit) 字节上限。")
                 dataTask.cancel()
                 return
             }
             bytes.append(data)
         }
         func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
-            if let error { failure = error }
+            if let error {
+                // A deliberate cancel after an HTTP/size rejection must not
+                // replace the specific cause with NSURLErrorCancelled.
+                if failure == nil || (error as NSError).code != NSURLErrorCancelled {
+                    let ns = error as NSError
+                    failure = fail("\(ns.domain) \(ns.code)：\(error.localizedDescription)")
+                }
+            }
             done.signal()
         }
     }
 
     static func download(_ url: URL, maxBytes: Int, disableProxy: Bool = false) throws -> Data {
-        let delegate = BoundedDownload(limit: maxBytes)
+        let delegate = BoundedDownload(limit: maxBytes, url: url)
         let configuration = URLSessionConfiguration.ephemeral
         configuration.timeoutIntervalForRequest = 8
         configuration.timeoutIntervalForResource = 12
@@ -135,11 +157,13 @@ enum PluginUpdates {
         guard delegate.done.wait(timeout: .now() + 13) == .success else {
             task.cancel()
             session.invalidateAndCancel()
-            throw PluginProtocol.Failure.unavailable
+            throw PluginProtocol.Failure.detail(
+                "请求 \(url.absoluteString) 超过 13 秒未响应（请求超时 8 秒，资源超时 12 秒）。")
         }
         session.finishTasksAndInvalidate()
-        guard delegate.accepted, delegate.failure == nil else {
-            throw PluginProtocol.Failure.unavailable
+        if let failure = delegate.failure { throw failure }
+        guard delegate.accepted else {
+            throw PluginProtocol.Failure.detail("请求 \(url.absoluteString) 未获得有效响应。")
         }
         return delegate.bytes
     }

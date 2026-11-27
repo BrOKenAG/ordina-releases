@@ -68,12 +68,18 @@ extension OptionalPluginInstaller {
         let directory = try scriptDirectory(home: home)
         let files = FileManager.default
         guard files.fileExists(atPath: directory.path) else { return [] }
-        var bundled = PluginInstaller.managedNames(environment: PluginEnvironment.production(
-            home: home, clientVersion: PluginEnvironment.current.clientVersion))
-        bundled.insert("Project Setup.py")
+        let environment = PluginEnvironment.production(
+            home: home, clientVersion: PluginEnvironment.current.clientVersion)
+        let managed = PluginInstaller.managedScriptTargets(environment: environment)
+        let builtIn = relative(environment.utilityDirectory.appendingPathComponent("Project Setup.py"),
+                               home: home)
         return try files.contentsOfDirectory(at: directory, includingPropertiesForKeys: [.isRegularFileKey, .isSymbolicLinkKey],
                                              options: .skipsHiddenFiles)
-            .filter { $0.pathExtension.lowercased() == "py" && !bundled.contains($0.lastPathComponent) && isRegularScript($0) }
+            .filter { url in
+                guard url.pathExtension.lowercased() == "py", isRegularScript(url) else { return false }
+                let target = relative(url, home: home)
+                return !managed.contains(target) && target != builtIn
+            }
             .sorted { $0.lastPathComponent.localizedStandardCompare($1.lastPathComponent) == .orderedAscending }
             .map { LocalScript(url: $0, summary: summary(at: $0)) }
     }
@@ -128,6 +134,13 @@ extension OptionalPluginInstaller {
             .appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: backup, withIntermediateDirectories: true)
         return backup.appendingPathComponent(file.lastPathComponent)
+    }
+
+    private static func relative(_ url: URL, home: URL) -> String {
+        let base = home.standardizedFileURL.path
+        let path = url.standardizedFileURL.path
+        guard path.hasPrefix(base + "/") else { return path }
+        return String(path.dropFirst(base.count + 1))
     }
 
     private static func isRegularScript(_ url: URL) -> Bool {
