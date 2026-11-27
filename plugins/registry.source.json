@@ -1,6 +1,6 @@
 {
   "format": 2,
-  "_comment": "唯一插件元数据源。所有签名清单由 scripts/build_feeds.py 从本文件派生，禁止手工编辑 registry.json / plugins/manifest.json / 各插件仓库 manifest.json。",
+  "_comment": "唯一插件元数据源。所有签名清单由 scripts/build_feeds.py 从本文件派生，禁止手工编辑 registry.json / plugins/manifest.json / 各插件仓库 manifest.json。name/summary/symbol/minClientVersion/capabilities 构成客户端展示与安装所需的全部插件描述；files 由发布事务在 GATE 通过后写入。",
   "plugins": {
     "minutes": {
       "repository": "BrOKenAG/ordina-plugin-minutes",
@@ -10,9 +10,322 @@
       "asset": "minutes.json",
       "source": "Minutes Roughcut",
       "published": true,
-      "version": "0.2.0",
-      "sha256": "8ee9e102a4e80ad8063596748d0d037edcf711da6cc182917c6ad52abcf8010c",
-      "size": 60688,
+      "version": "0.4.0",
+      "sha256": "22a501f0350ac2706df26b8290ea8923b942be9eee390d890d762219c719afc0",
+      "size": 32979280,
+      "name": "Minutes Roughcut",
+      "summary": "将飞书妙记划稿发送至 Resolve",
+      "symbol": "text.badge.plus",
+      "minClientVersion": "1.10.0",
+      "protocol": 2,
+      "capabilities": [
+        "resolve.utilityScript",
+        "resolve.support",
+        "chrome.nativeMessagingHost",
+        "chrome.unpackedExtension",
+        "macos.application"
+      ],
+      "supportDirectoryName": "Minutes Roughcut",
+      "nativeMessagingHost": "host.command",
+      "files": [
+        {
+          "path": "Minutes Roughcut.py",
+          "sha256": "5ace809dda1c7b6e7dd850896c6e241790c9293479ea45231635a9108b54f715",
+          "size": 259,
+          "role": "utilityScript",
+          "installName": "Minutes Roughcut.py"
+        },
+        {
+          "path": "MinutesRoughcut.app/Contents/Info.plist",
+          "sha256": "b21a6bf221d1c3fb4cf225905431502a68b2f4e62e9c6b3d5e853378be71d982",
+          "size": 498,
+          "role": "application"
+        },
+        {
+          "path": "MinutesRoughcut.app/Contents/MacOS/MinutesPrototype",
+          "sha256": "939b4212025442fed7a1669a74f5d9f3ab029b64208e2d9039292edeeebef861",
+          "size": 1180544,
+          "role": "application",
+          "executable": true
+        },
+        {
+          "path": "MinutesRoughcut.app/Contents/Resources/runtime/PYTHON-LICENSE.txt",
+          "sha256": "b0e25a78cffb43f4d92de8b61ccfa1f1f98ecbc22330b54b5251e7b6ba010231",
+          "size": 13804,
+          "role": "application"
+        },
+        {
+          "path": "MinutesRoughcut.app/Contents/Resources/runtime/bin/python3",
+          "sha256": "91e7a7cc1a2010017c11ab8ecd4513b8fc2158bfd482635b39b65b6770d3306a",
+          "size": 116960,
+          "role": "application",
+          "executable": true
+        },
+        {
+          "path": "MinutesRoughcut.app/Contents/Resources/runtime/lib/libpython3.14.dylib",
+          "sha256": "17e6b0aa5a8d6c3c2d879cce244c3b642cb46f0e70074923e8b5f2522c479f05",
+          "size": 14993392,
+          "role": "application",
+          "executable": true
+        },
+        {
+          "path": "MinutesRoughcut.app/Contents/Resources/runtime/lib/python3.14/lib-dynload/_bisect.cpython-314-darwin.so",
+          "sha256": "0fd92dd2720a5511fdac8f373efa4f86d0455dfbdc09603fe7d14ff1ea1ddff4",
+          "size": 137440,
+          "role": "application",
+          "executable": true
+        },
+        {
+          "path": "MinutesRoughcut.app/Contents/Resources/runtime/lib/python3.14/lib-dynload/_blake2.cpython-314-darwin.so",
+          "sha256": "f9932b962bf4c085f62e1df69113546a655e8c644a6a03e419022669a5f01165",
+          "size": 189840,
+          "role": "application",
+          "executable": true
+        },
+        {
+          "path": "MinutesRoughcut.app/Contents/Resources/runtime/lib/python3.14/lib-dynload/_csv.cpython-314-darwin.so",
+          "sha256": "23cfe297ab9ec7f0f5eca059810f06105b6f39327ad922bcd53b185fb5405742",
+          "size": 176112,
+          "role": "application",
+          "executable": true
+        },
+        {
+          "path": "MinutesRoughcut.app/Contents/Resources/runtime/lib/python3.14/lib-dynload/_decimal.cpython-314-darwin.so",
+          "sha256": "135efc2e6716f49e818b5e9bd25d55c88381ca531080760943ff7642afd08e9b",
+          "size": 716976,
+          "role": "application",
+          "executable": true
+        },
+        {
+          "path": "MinutesRoughcut.app/Contents/Resources/runtime/lib/python3.14/lib-dynload/_heapq.cpython-314-darwin.so",
+          "sha256": "52b852eb508bf340152d34a8c618bae3bb8552c19d9e6093ab258d2d781725c0",
+          "size": 137024,
+          "role": "application",
+          "executable": true
+        },
+        {
+          "path": "MinutesRoughcut.app/Contents/Resources/runtime/lib/python3.14/lib-dynload/_json.cpython-314-darwin.so",
+          "sha256": "63226f9b0d4be185bd994c4f6c6dd296a5369809ed2fb840278afa664e5af796",
+          "size": 174688,
+          "role": "application",
+          "executable": true
+        },
+        {
+          "path": "MinutesRoughcut.app/Contents/Resources/runtime/lib/python3.14/lib-dynload/_posixsubprocess.cpython-314-darwin.so",
+          "sha256": "bc3893ae3ff0c7fc827fd129457e7099c43cd2da6d10ca63b0b21a82b3828024",
+          "size": 138896,
+          "role": "application",
+          "executable": true
+        },
+        {
+          "path": "MinutesRoughcut.app/Contents/Resources/runtime/lib/python3.14/lib-dynload/_random.cpython-314-darwin.so",
+          "sha256": "493824b990b5f37ac42022b300cb4479212805fd832f07f509f7e7f3d08aa704",
+          "size": 138688,
+          "role": "application",
+          "executable": true
+        },
+        {
+          "path": "MinutesRoughcut.app/Contents/Resources/runtime/lib/python3.14/lib-dynload/_sha2.cpython-314-darwin.so",
+          "sha256": "08da53c186afcec45bf282681559f7610042655d00fd9adec24a17c6c1a2e545",
+          "size": 190816,
+          "role": "application",
+          "executable": true
+        },
+        {
+          "path": "MinutesRoughcut.app/Contents/Resources/runtime/lib/python3.14/lib-dynload/_socket.cpython-314-darwin.so",
+          "sha256": "169b21b1c45ce737ca05bbedaf4c5a849a8674bce8914bd05836fda2cbd36007",
+          "size": 273104,
+          "role": "application",
+          "executable": true
+        },
+        {
+          "path": "MinutesRoughcut.app/Contents/Resources/runtime/lib/python3.14/lib-dynload/_statistics.cpython-314-darwin.so",
+          "sha256": "1eab9218b039ea15fa2d6298983be728b9bdf5a99596e3b4e280f74662732917",
+          "size": 118128,
+          "role": "application",
+          "executable": true
+        },
+        {
+          "path": "MinutesRoughcut.app/Contents/Resources/runtime/lib/python3.14/lib-dynload/_struct.cpython-314-darwin.so",
+          "sha256": "1381c5c0cc6dbaa4481584d055528d51f380fe88eb21f9193a07b5c241a29c32",
+          "size": 202464,
+          "role": "application",
+          "executable": true
+        },
+        {
+          "path": "MinutesRoughcut.app/Contents/Resources/runtime/lib/python3.14/lib-dynload/_uuid.cpython-314-darwin.so",
+          "sha256": "a9f326cd2521732cceb741853af65f8e8d495b2dfb3dac0d789a8324b09a62ab",
+          "size": 117968,
+          "role": "application",
+          "executable": true
+        },
+        {
+          "path": "MinutesRoughcut.app/Contents/Resources/runtime/lib/python3.14/lib-dynload/array.cpython-314-darwin.so",
+          "sha256": "857449f5117728b464e7ee1ebe930ecec44c7f43bb6ded620dd1684f24a361e7",
+          "size": 236192,
+          "role": "application",
+          "executable": true
+        },
+        {
+          "path": "MinutesRoughcut.app/Contents/Resources/runtime/lib/python3.14/lib-dynload/binascii.cpython-314-darwin.so",
+          "sha256": "e0ed8e8fab2d347aa608f6f4fc114448ea38cf2ba706074a4e9b606b59b0d65b",
+          "size": 156128,
+          "role": "application",
+          "executable": true
+        },
+        {
+          "path": "MinutesRoughcut.app/Contents/Resources/runtime/lib/python3.14/lib-dynload/fcntl.cpython-314-darwin.so",
+          "sha256": "92b4491a03fc584aa0f362ed99eb682ea8085ce84094df9f697fd3a1b4c053a2",
+          "size": 137408,
+          "role": "application",
+          "executable": true
+        },
+        {
+          "path": "MinutesRoughcut.app/Contents/Resources/runtime/lib/python3.14/lib-dynload/math.cpython-314-darwin.so",
+          "sha256": "3f7fdb23255151d3a5ce318d32af05743ab56b55238b87214669739ebb2233e3",
+          "size": 231776,
+          "role": "application",
+          "executable": true
+        },
+        {
+          "path": "MinutesRoughcut.app/Contents/Resources/runtime/lib/python3.14/lib-dynload/resource.cpython-314-darwin.so",
+          "sha256": "e194f1a1ab5ebf12a442caef5ba629f8aaf6e479aeef5ad511de3cd72c7a7a08",
+          "size": 137968,
+          "role": "application",
+          "executable": true
+        },
+        {
+          "path": "MinutesRoughcut.app/Contents/Resources/runtime/lib/python3.14/lib-dynload/select.cpython-314-darwin.so",
+          "sha256": "dac7e08c7fb61510e10c9281da2e138404d773dc16f5c330b92f5ef6097c0330",
+          "size": 177760,
+          "role": "application",
+          "executable": true
+        },
+        {
+          "path": "MinutesRoughcut.app/Contents/Resources/runtime/lib/python3.14/lib-dynload/unicodedata.cpython-314-darwin.so",
+          "sha256": "19daae4b667e61faf4d555341db73ae49af25b47b7d837355f974356cb231fa4",
+          "size": 1587024,
+          "role": "application",
+          "executable": true
+        },
+        {
+          "path": "MinutesRoughcut.app/Contents/Resources/runtime/lib/python3.14/lib-dynload/zlib.cpython-314-darwin.so",
+          "sha256": "fa26b7bf0c7bcf513d46ff7e4fba407802d86d65abe8fa29d8f5116b4087e34e",
+          "size": 197040,
+          "role": "application",
+          "executable": true
+        },
+        {
+          "path": "MinutesRoughcut.app/Contents/Resources/runtime/lib/python314.zip",
+          "sha256": "a7511a5c06858215d396a354594fc947fe3785551ac5c899c5ab6c81b8af4f69",
+          "size": 2797348,
+          "role": "application"
+        },
+        {
+          "path": "MinutesRoughcut.app/Contents/_CodeSignature/CodeResources",
+          "sha256": "8b36dbb9183b1c5ef045681fe82c355bd5ffafd86da17324c8222d723d3f6680",
+          "size": 10254,
+          "role": "application"
+        },
+        {
+          "path": "ResolvePrototype.py",
+          "sha256": "a146084bde4bf52dd734c3359e2536d271cdbb564809cd428eb00cab4c0dbf47",
+          "size": 5525,
+          "role": "support"
+        },
+        {
+          "path": "bridge.py",
+          "sha256": "bd9a0e222fb7790b473068395adfaeec980772d8215782012112cfe76f527762",
+          "size": 1346,
+          "role": "support"
+        },
+        {
+          "path": "chrome.json",
+          "sha256": "ad21262c397f38d6f24725596a491d3fba2bd5a3cbcc84be57a4f45678e21169",
+          "size": 150,
+          "role": "nativeMessagingManifest",
+          "installName": "com.minutesroughcut.bridge.json"
+        },
+        {
+          "path": "engine.py",
+          "sha256": "e0279ee0eade471d9be35efc4a04aa9a24a05899378e8008e8a6ef6c6e9ee237",
+          "size": 10104,
+          "role": "support"
+        },
+        {
+          "path": "engine_service.py",
+          "sha256": "27a5d9233b07af72ded57a32e79fbb7c59d878b3defb2a89637e72eb8095f613",
+          "size": 3467,
+          "role": "support"
+        },
+        {
+          "path": "extension/bridge.js",
+          "sha256": "c44ae011eedbceeb37f12893e987f30b3128814864373c81cefa9aa95845284b",
+          "size": 652,
+          "role": "extension"
+        },
+        {
+          "path": "extension/capture.js",
+          "sha256": "20e980f4248ee4561daa863ded9c2119d0ad06cc6d477ad3e28b7b61d1c6ebb4",
+          "size": 1961,
+          "role": "extension"
+        },
+        {
+          "path": "extension/core.js",
+          "sha256": "4453718656566e0275e7e9a127900d0b34698144508f9f38edcb38aac75d2746",
+          "size": 1042,
+          "role": "extension"
+        },
+        {
+          "path": "extension/icons/logo.png",
+          "sha256": "ec2c4d61ae61602b95a8ee8511ca7aab55a4b401d81723bce6ab70f1b2886df5",
+          "size": 3448,
+          "role": "extension"
+        },
+        {
+          "path": "extension/manifest.json",
+          "sha256": "fc5b4e2ca4f70f62d5e0efe872a6a0fd2e3339b09ed56bde42afeea62418da8f",
+          "size": 1326,
+          "role": "extension"
+        },
+        {
+          "path": "extension/popup.html",
+          "sha256": "206a1f07eb9391419860d3830a3ae532d2d33f2b66a510021c9f1ed30aa71091",
+          "size": 1252,
+          "role": "extension"
+        },
+        {
+          "path": "extension/popup.js",
+          "sha256": "3e8e380993a763ed21b6533491c2c0420f4f5614590ec9d752558e1905e47fb6",
+          "size": 2808,
+          "role": "extension"
+        },
+        {
+          "path": "extension/style.css",
+          "sha256": "b3466efa3cb0ff439ea8e4f11f02614391f6b023e78cc4bec17b785dafeab088",
+          "size": 3341,
+          "role": "extension"
+        },
+        {
+          "path": "host.command",
+          "sha256": "53d2ff034248de894f74853c4b592e27160f6c6c57abf44908c2147e8af72d9a",
+          "size": 506,
+          "role": "nativeMessagingHost",
+          "executable": true
+        },
+        {
+          "path": "native_host.py",
+          "sha256": "e3aa5611ebd678052e6aa4e9f9e3a7ce6965d1b763d67f7e42cc9cc51482206d",
+          "size": 2467,
+          "role": "support"
+        },
+        {
+          "path": "plugin.json",
+          "sha256": "457f01e6073582d65049f0cac33c2a5405d58616b560bffa5af9216736a5415e",
+          "size": 6140,
+          "role": "metadata"
+        }
+      ],
       "legacy": {
         "version": "0.2.0",
         "sha256": "8ee9e102a4e80ad8063596748d0d037edcf711da6cc182917c6ad52abcf8010c",
@@ -25,11 +338,20 @@
       "downloadPrefix": "/BrOKenAG/ordina-plugin-multicam/releases/download/",
       "kind": "script",
       "asset": "Multicam.Tools.py",
+      "installName": "Multicam Tools.py",
       "source": "Multicam Tools.py",
       "published": true,
       "version": "2.1",
       "sha256": "145c1af43e950220bb839f2e187c12abe8382c5673d745659d794535675883b0",
       "size": 37757,
+      "name": "Multicam Tools",
+      "summary": "批量命名机位，创建多机位片段",
+      "symbol": "video",
+      "minClientVersion": "1.9.6",
+      "protocol": 2,
+      "capabilities": [
+        "resolve.utilityScript"
+      ],
       "legacy": {
         "version": "2.1",
         "sha256": "145c1af43e950220bb839f2e187c12abe8382c5673d745659d794535675883b0",
@@ -42,8 +364,23 @@
       "downloadPrefix": "/BrOKenAG/ordina-plugin-yueliu/releases/download/",
       "kind": "script",
       "asset": "Import.YueLiu.py",
+      "installName": "Import YueLiu.py",
       "source": "Import YueLiu.py",
-      "published": false
+      "published": false,
+      "version": "1.0.0",
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "size": 1,
+      "name": "Import YueLiu",
+      "summary": "导入阅流审片意见",
+      "symbol": "text.bubble",
+      "minClientVersion": "1.9.6",
+      "protocol": 2,
+      "capabilities": [
+        "resolve.utilityScript"
+      ],
+      "legacyNames": [
+        "导入阅流.py"
+      ]
     }
   }
 }
