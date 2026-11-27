@@ -44,13 +44,13 @@ checks = {
     'VerifyDeveloperCenter': ['ResolveService', 'PluginProtocol', 'PluginEnvironment',
                               'PluginUpdates', 'PluginInstaller', 'OptionalPluginInstaller',
                               'DeveloperBridge', 'DevPublisherTool', 'DevToolManager',
-                              'DeveloperAuthentication', 'DeveloperAuthState',
+                              'DeveloperAuthentication', 'DeveloperAuthSession', 'DeveloperAuthState',
                               'DeveloperAuthKeychain', 'DeveloperTOTP', 'PluginPublishing',
                               'DeveloperCenter'],
     'VerifyPluginPublishing': ['ResolveService', 'PluginProtocol', 'PluginEnvironment',
                                'PluginUpdates', 'PluginInstaller', 'OptionalPluginInstaller',
                                'DeveloperBridge', 'DevPublisherTool', 'DevToolManager',
-                               'DeveloperAuthentication', 'DeveloperAuthState',
+                               'DeveloperAuthentication', 'DeveloperAuthSession', 'DeveloperAuthState',
                                'DeveloperAuthKeychain', 'DeveloperTOTP', 'PluginPublishing'],
 }
 with tempfile.TemporaryDirectory(prefix='ordina-verification-') as temporary:

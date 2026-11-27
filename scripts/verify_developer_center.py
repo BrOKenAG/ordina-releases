@@ -47,6 +47,7 @@ CLIENT_SOURCES = [
     'Ordina/DevPublisherTool.swift',
     'Ordina/DevToolManager.swift',
     'Ordina/DeveloperAuthentication.swift',
+    'Ordina/DeveloperAuthSession.swift',
     'Ordina/DeveloperAuthState.swift',
     'Ordina/DeveloperAuthKeychain.swift',
     'Ordina/DeveloperTOTP.swift',
