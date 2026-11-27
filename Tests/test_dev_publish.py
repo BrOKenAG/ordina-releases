@@ -186,6 +186,27 @@ class InspectTests(EngineTestCase):
         self.assertEqual(caught.exception.code, 'release.invalid')
         self.assertIn('必须高于', str(caught.exception))
 
+    def test_existing_plugin_uses_new_package_capabilities_and_keeps_official_target(self):
+        old = publish_plugin.register_plugin(PLUGIN, self.source)
+        old.update(version='0.9.0', sha256='a' * 64, size=123)
+        self.registry.write_text(json.dumps({'format': 2, 'plugins': {PLUGIN: old}}), encoding='utf-8')
+        meta_path = self.source / 'plugin.json'
+        meta = json.loads(meta_path.read_text())
+        meta['capabilities'].append('macos.application')
+        meta['minClientVersion'] = '1.10.0'
+        meta['repository'] = 'attacker/other'
+        meta['files']['Example.app/Contents/Info.plist'] = {'role': 'application'}
+        app = self.source / 'Example.app/Contents/Info.plist'
+        app.parent.mkdir(parents=True); app.write_text('test fixture')
+        meta_path.write_text(json.dumps(meta))
+        package = zip_plugin(self.source, self.resource('native-update.zip'))
+        with patch.object(publish_plugin, 'verify_native_bundle'):
+            prepared = dp.prepare_zip(package, 'update', root=self.repo)
+        self.assertIn('macos.application', prepared.target['capabilities'])
+        self.assertEqual(prepared.target['minClientVersion'], '1.10.0')
+        self.assertEqual(prepared.target['repository'], f'BrOKenAG/ordina-plugin-{PLUGIN}')
+        self.assertEqual(prepared.target['feed'], old['feed'])
+
     def test_prepare_zip_accepts_a_new_version(self):
         prepared = dp.prepare_zip(self.package, '首次发布', root=self.repo)
         self.assertEqual(prepared.version, '1.0.0')

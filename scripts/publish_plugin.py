@@ -273,7 +273,19 @@ def prepare_release(name, source_path, notes=None, plugins=None, document=None,
         if source_path is None:
             raise ValueError(f'未登记的插件 {name} 需要提供插件源目录。')
         plugins[name] = register_plugin(name, source_path)
-    meta = plugins[name]
+    meta = copy.deepcopy(plugins[name])
+    # ZIP metadata may evolve on update, but repository, URLs and asset names
+    # remain controlled by the existing official registry entry.
+    updated_fields = {}
+    if not is_new and source_path is not None and meta.get('kind') == 'bundle':
+        package = plugin_meta(Path(source_path))
+        if package['id'] != name:
+            raise ValueError('插件包标识与已有插件不一致。')
+        for field in ('name', 'summary', 'symbol', 'minClientVersion', 'protocol',
+                      'capabilities', 'supportDirectoryName', 'nativeMessagingHost', 'legacyNames'):
+            if field in package:
+                updated_fields[field] = package[field]
+        meta.update(updated_fields)
     source, data, ver, files = build_asset(meta, source_path, name)
     if meta.get('protocol', protocol.PROTOCOL) != protocol.PROTOCOL:
         raise ValueError('插件协议版本不受支持。')
@@ -290,6 +302,7 @@ def prepare_release(name, source_path, notes=None, plugins=None, document=None,
         SOURCE_PATH.read_text(encoding='utf-8'))
     if name not in document['plugins']:
         document['plugins'][name] = copy.deepcopy(plugins[name])
+    document['plugins'][name].update(updated_fields)
     document['plugins'][name].update({
         'version': ver,
         'sha256': hashlib.sha256(data).hexdigest(),

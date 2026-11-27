@@ -45,7 +45,7 @@ import publish_plugin
 from release_transaction import LocalGateway, ReleaseError
 
 TOOL = 'ordina-publisher'
-TOOL_VERSION = '1.4.0'
+TOOL_VERSION = '1.5.0'
 PROTOCOL = 1
 MIN_CLIENT = '1.10.0'
 MAX_NOTES = 2000
