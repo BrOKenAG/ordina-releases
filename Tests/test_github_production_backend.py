@@ -5,6 +5,29 @@ sys.path.insert(0,str(ROOT/'scripts'))
 from github_production_backend import ProductionBackend
 
 class ProductionBackendTests(unittest.TestCase):
+ def test_public_download_resumes_after_timeout(self):
+  import subprocess
+  from unittest.mock import patch
+  calls=[]
+  def download(args, **kwargs):
+   calls.append(args)
+   target=Path(args[args.index('-o')+1])
+   if len(calls)==1:
+    target.write_bytes(b'part')
+    raise subprocess.CalledProcessError(28,args)
+   self.assertIn('--continue-at',args)
+   with target.open('ab') as stream: stream.write(b'ial')
+  with patch('github_production_backend.subprocess.run',side_effect=download), patch('github_production_backend.time.sleep'):
+   self.assertEqual(ProductionBackend._fetch_public('https://example.test/asset'),b'partial')
+  self.assertEqual(len(calls),2)
+
+ def test_public_download_stops_after_bounded_failures(self):
+  import subprocess
+  from unittest.mock import patch
+  with patch('github_production_backend.subprocess.run',side_effect=subprocess.CalledProcessError(28,'curl')) as run, patch('github_production_backend.time.sleep'):
+   with self.assertRaises(subprocess.CalledProcessError): ProductionBackend._fetch_public('https://example.test/asset')
+   self.assertEqual(run.call_count,3)
+
  def test_plugin_backend_rejects_lab_mode_before_lock_write(self):
   import os
   from unittest.mock import patch
