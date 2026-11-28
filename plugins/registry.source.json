@@ -381,6 +381,45 @@
       "legacyNames": [
         "导入阅流.py"
       ]
+    },
+    "import-yueliu": {
+      "repository": "BrOKenAG/ordina-plugin-import-yueliu",
+      "feed": "https://brokenag.github.io/ordina-plugin-import-yueliu/manifest-v2.json",
+      "downloadPrefix": "/BrOKenAG/ordina-plugin-import-yueliu/releases/download/",
+      "kind": "bundle",
+      "asset": "import-yueliu.json",
+      "source": "package",
+      "published": true,
+      "sha256": "ced9720461e4f542283c7bf9c48d37d0e46e39db9296d2496ce45c0fca7a86bc",
+      "size": 87450,
+      "name": "Import YueLiu",
+      "summary": "Import YueLiu review comments, filter and track completed changes. Importing this module does not access Resolve.",
+      "symbol": "doc.text",
+      "iconID": "note",
+      "minClientVersion": "1.10.0",
+      "protocol": 2,
+      "capabilities": [
+        "resolve.utilityScript"
+      ],
+      "supportDirectoryName": "import-yueliu",
+      "nativeMessagingHost": null,
+      "legacyNames": null,
+      "version": "2.3",
+      "files": [
+        {
+          "path": "Import YueLiu.py",
+          "sha256": "4da0e176310c615b966b5acb41d7146ee3ca8d8c54853f03f049beb63e8eb247",
+          "size": 65080,
+          "role": "utilityScript",
+          "installName": "Import YueLiu.py"
+        },
+        {
+          "path": "plugin.json",
+          "sha256": "1c5de74b823658cea6d9d523c81fa5de003713f98cce99831dd46368b21894d8",
+          "size": 431,
+          "role": "metadata"
+        }
+      ]
     }
   }
 }
