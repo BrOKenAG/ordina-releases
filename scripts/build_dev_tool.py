@@ -52,6 +52,12 @@ ASSET_TAG = 'dev-tool-v{version}'
 
 
 def read_version():
+    # The archive entry point sets its own immutable version at runtime.
+    # The source manifest identifies the current independently released tool.
+    if MANIFEST_SOURCE.is_file():
+        versions = json.loads(MANIFEST_SOURCE.read_text(encoding='utf-8')).get('versions', [])
+        if versions:
+            return max((item['version'] for item in versions), key=_version_key)
     text = (ROOT / 'scripts' / 'dev_publish.py').read_text(encoding='utf-8')
     for line in text.splitlines():
         if line.startswith('TOOL_VERSION = '):

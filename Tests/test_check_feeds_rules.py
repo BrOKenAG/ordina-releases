@@ -84,7 +84,10 @@ class FeedRuleTests(unittest.TestCase):
         for name, descriptor in registry['plugins'].items():
             self.assertTrue(cf.valid_feed(descriptor['feed']))
             self.assertTrue(cf.valid_prefix(descriptor['downloadPrefix']))
-            self.assertIsNone(cf.entry_url_error(legacy['plugins'][name], LEGACY_PREFIX))
+            if name in legacy['plugins']:
+                self.assertIsNone(cf.entry_url_error(legacy['plugins'][name], LEGACY_PREFIX))
+            else:
+                self.assertFalse(plugins[name].get('legacy'))
             self.assertIsNone(cf.entry_url_error(per_plugin[name]['plugins'][name],
                                                  descriptor['downloadPrefix']))
 

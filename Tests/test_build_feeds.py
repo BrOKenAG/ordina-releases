@@ -37,12 +37,15 @@ class FeedDerivationTests(unittest.TestCase):
             required = {'repository', 'feed', 'downloadPrefix', 'kind', 'name',
                         'summary', 'symbol', 'version', 'minClientVersion',
                         'protocol', 'capabilities'}
-            self.assertEqual(set(descriptor), required)
+            self.assertEqual(set(descriptor) - {'iconID'}, required)
+            if 'iconID' in descriptor:
+                self.assertIsInstance(descriptor['iconID'], str)
             self.assertEqual(descriptor['protocol'], 2)
 
     def test_legacy_feed_contains_every_published_plugin(self):
         registry, legacy, per_plugin = bf.documents(self.plugins)
-        self.assertEqual(set(legacy['plugins']), set(bf.published(self.plugins)))
+        expected = {name for name, meta in bf.published(self.plugins).items() if meta.get('legacy')}
+        self.assertEqual(set(legacy['plugins']), expected)
         self.assertEqual(legacy['format'], 1)
 
     def test_each_plugin_feed_contains_only_itself(self):
@@ -56,8 +59,11 @@ class FeedDerivationTests(unittest.TestCase):
             self.assertTrue(entry['files'])
             # Legacy feeds are frozen at versions that still exist in the
             # original release repository, so they may lag the current one.
-            self.assertIn('/BrOKenAG/ordina-releases/releases/download/',
-                          legacy['plugins'][name]['url'])
+            if name in legacy['plugins']:
+                self.assertIn('/BrOKenAG/ordina-releases/releases/download/',
+                              legacy['plugins'][name]['url'])
+            else:
+                self.assertFalse(self.plugins[name].get('legacy'))
 
     def test_bundle_kind_is_only_emitted_for_bundles(self):
         registry, legacy, per_plugin = bf.documents(self.plugins)

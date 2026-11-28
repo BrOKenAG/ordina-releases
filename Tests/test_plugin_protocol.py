@@ -208,7 +208,8 @@ class FeedTests(unittest.TestCase):
             self.assertEqual(entry['descriptor']['id'], name)
             self.assertTrue(entry['descriptor']['utilityScript'])
             self.assertTrue(entry['files'])
-        self.assertEqual(set(legacy['plugins']), set(registry['plugins']))
+        self.assertEqual(set(legacy['plugins']),
+                         {name for name in registry['plugins'] if plugins[name].get('legacy')})
 
     def test_new_plugin_metadata_can_be_registered(self):
         import json
