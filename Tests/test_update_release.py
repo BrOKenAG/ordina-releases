@@ -85,6 +85,7 @@ class AppcastValidationTests(unittest.TestCase):
 
         def generate(command, **kwargs):
             if Path(command[0]).name == 'generate_appcast':
+                self.assertEqual(command[command.index('--maximum-versions') + 1], '0')
                 directory = Path(command[-1])
                 feed = directory / 'appcast.xml'
                 tree = ET.parse(feed)

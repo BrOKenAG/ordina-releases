@@ -70,7 +70,7 @@ def main():
         if previous_feed.exists():
             shutil.copy2(previous_feed, staged_feed)
         subprocess.run([str(tools / 'generate_appcast'), '--account', KEYCHAIN_ACCOUNT,
-                        '--download-url-prefix', prefix, '--maximum-deltas', '0',
+                        '--download-url-prefix', prefix, '--maximum-deltas', '0', '--maximum-versions', '0',
                         '--link', f'https://github.com/{args.repository}/releases', str(staging)], check=True)
         validate_appcast(staged_feed, build, version, archive.name, prefix, archive.stat().st_size)
         subprocess.run([str(tools / 'sign_update'), '--account', KEYCHAIN_ACCOUNT,
