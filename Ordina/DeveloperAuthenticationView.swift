@@ -6,8 +6,12 @@ struct DeveloperAuthenticationView: View {
     let configuration: DeveloperConfiguration
     let configure: () -> Void
     @State private var code = ""
+    @State private var useAuthenticator = false
     @FocusState private var focused: Bool
     private let accent = OrdinaTokens.focus
+    private var showDeviceUnlock: Bool {
+        auth.deviceTrusted && !useAuthenticator && auth.setupURI == nil
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -26,21 +30,22 @@ struct DeveloperAuthenticationView: View {
                     .padding(.top, 10)
                 Text("使用验证器扫码绑定")
                     .font(.system(size: 12)).foregroundStyle(Paper.secondary).padding(.top, 4)
-            } else {
+            } else if !showDeviceUnlock {
                 Text("输入 Authenticator 中的六位动态验证码")
                     .font(.system(size: 13)).foregroundStyle(Paper.secondary).padding(.top, 8)
+            } else {
+                Text("输入 Authenticator 中的六位动态验证码")
+                    .font(.system(size: 13)).hidden().padding(.top, 8)
             }
-            if auth.deviceTrusted && auth.setupURI == nil {
+            if showDeviceUnlock {
+                Color.clear.frame(width: 304, height: 54).padding(.top, 28)
                 Button("使用此 Mac 解锁") { Task { await auth.unlockWithDeviceTrust(configuration) } }
                     .buttonStyle(.plain).font(.system(size: 15, weight: .medium))
                     .foregroundStyle(Paper.onAccent).frame(maxWidth: .infinity).frame(height: 48)
                     .background(accent, in: RoundedRectangle(cornerRadius: 12))
-                    .disabled(auth.busy).padding(.top, 20)
-                Text("通过 Touch ID 或系统登录密码解锁，不保存密码。")
-                    .font(.system(size: 12)).foregroundStyle(Paper.secondary).padding(.top, 6)
-            }
-            if auth.bound || auth.setupURI != nil {
-                codeField.padding(.top, auth.setupURI == nil ? (auth.deviceTrusted ? 14 : 28) : 12)
+                    .disabled(auth.busy).padding(.top, 18)
+            } else if auth.bound || auth.setupURI != nil {
+                codeField.padding(.top, auth.setupURI == nil ? 28 : 12)
                 Button("验证身份") { submit() }
                     .buttonStyle(.plain).font(.system(size: 15, weight: .medium))
                     .foregroundStyle(Paper.onAccent).frame(maxWidth: .infinity).frame(height: 48)
@@ -61,7 +66,12 @@ struct DeveloperAuthenticationView: View {
                     .multilineTextAlignment(.center).textSelection(.enabled).padding(.top, 8)
             }
             HStack(spacing: 18) {
-                if auth.bound && auth.setupURI == nil {
+                if auth.deviceTrusted && auth.bound && auth.setupURI == nil {
+                    Button(showDeviceUnlock ? "使用动态验证码" : "使用此 Mac 解锁") {
+                        useAuthenticator.toggle(); code = ""; auth.error = nil
+                    }
+                }
+                if !showDeviceUnlock && auth.bound && auth.setupURI == nil {
                     Button("无法访问身份验证器？") { Task { await auth.beginBinding(configuration) } }
                 }
                 if auth.deviceTrusted && auth.setupURI == nil {
@@ -70,7 +80,7 @@ struct DeveloperAuthenticationView: View {
                 if auth.setupURI != nil {
                     Button("取消") { auth.cancelBinding(); code = "" }
                 }
-                Button("配置发布工具") { configure() }
+                Button(auth.authorizationExpired ? "配置发布授权" : "配置发布工具") { configure() }
             }.buttonStyle(.plain).font(.system(size: 12)).foregroundStyle(Paper.secondary)
                 .disabled(auth.busy).padding(.top, 16)
             Spacer(minLength: 14)

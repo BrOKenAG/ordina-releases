@@ -71,6 +71,25 @@ struct VerifyDeveloperAuthenticationFlow {
         await restored.beginBinding(configuration)
         precondition(restored.setupURI != nil && secret(restored.setupURI!) != seed)
         restored.cancelBinding()
+        var deviceChecks = 0
+        var authorityChecks = 0
+        let trusted = DeveloperAuthentication(recoveryCheck: { deviceChecks += 1 }, authorityCheck: {
+            authorityChecks += 1
+            if authorityChecks == 1 { throw DevFailure(code: "auth.expired", message: "expired") }
+        })
+        trusted.deviceTrusted = true
+        await trusted.unlockWithDeviceTrust(configuration)
+        precondition(!trusted.unlocked && trusted.authorizationExpired && deviceChecks == 1)
+        await trusted.unlockWithDeviceTrust(configuration)
+        precondition(trusted.unlocked && !trusted.authorizationExpired && deviceChecks == 1)
+        trusted.lock()
+        await trusted.unlockWithDeviceTrust(configuration)
+        precondition(trusted.unlocked && deviceChecks == 2)
+        trusted.lock()
+        let cancelled = DeveloperAuthentication(recoveryCheck: { throw RecoveryTestError.denied }, authorityCheck: {})
+        cancelled.deviceTrusted = true
+        await cancelled.unlockWithDeviceTrust(configuration)
+        precondition(!cancelled.unlocked && cancelled.error != nil && !cancelled.authorizationExpired)
         print("Isolated binding, authentication, replay, session, revocation and rebinding passed")
     }
 }
