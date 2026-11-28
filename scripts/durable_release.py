@@ -131,6 +131,18 @@ def prepare(plan, scope, include_appcast=True, only_appcast=False,
     tid = scope_id(plan, scope)
     directory = Path(journal_dir)
     directory.mkdir(parents=True, exist_ok=True)
+    # A rolled-back attempt remains immutable and visible in history. Reuse
+    # an unfinished subsequent attempt, or allocate the next attempt number.
+    base = tid
+    attempt = 0
+    while (directory / f'{tid}.json').exists():
+        record = json.loads((directory / f'{tid}.json').read_text(encoding='utf-8'))
+        if record.get('status') != 'rolled_back':
+            break
+        attempt += 1
+        tid = f'{base}-r{attempt}'
+        if not ID_RE.fullmatch(tid):
+            raise ValueError('事务尝试次数超出限制。')
     journal = directory / f'{tid}.json'
     asset_source = directory / f'{tid}.asset'
     if asset_source.exists():

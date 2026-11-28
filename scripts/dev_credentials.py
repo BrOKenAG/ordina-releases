@@ -187,7 +187,12 @@ def load(path=None, scope=None, repository=None):
         if not scoped:
             raise
         document = verify_raw(scoped)
-        check(document, scope=scope, repository=repository)
+        try:
+            check(document, scope=scope, repository=repository)
+        except CredentialError as scoped_error:
+            if scoped_error.code == 'auth.expired':
+                raise error
+            raise
         if document.get('repositories') != [repository]:
             _fail('auth.repository', '临时授权仓库范围无效。')
         source = 'keychain-scoped'

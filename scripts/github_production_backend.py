@@ -147,10 +147,29 @@ class ProductionBackend(GitHubLabMultiBackend):
     def _fetch_public(url):
         with tempfile.TemporaryDirectory(prefix='ordina-public-check-') as tmp:
             target = Path(tmp) / 'download'
-            subprocess.run(['/usr/bin/curl', '--fail', '--location', '--silent', '--show-error',
-                            '--max-time', '90', '--max-filesize', '1073741824', url,
-                            '-o', str(target)], check=True, timeout=100)
-            return target.read_bytes()
+            limit = 1073741824
+            for attempt in range(3):
+                command = ['/usr/bin/curl', '--fail', '--location', '--silent', '--show-error',
+                           '--max-time', '90', '--max-filesize', str(limit)]
+                if target.exists() and target.stat().st_size:
+                    if target.stat().st_size > limit:
+                        raise ValueError('下载资源超过大小限制。')
+                    command += ['--continue-at', '-']
+                command += [url, '-o', str(target)]
+                try:
+                    subprocess.run(command, check=True, timeout=100)
+                    if target.stat().st_size > limit:
+                        raise ValueError('下载资源超过大小限制。')
+                    return target.read_bytes()
+                except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as error:
+                    code = getattr(error, 'returncode', 28)
+                    if code == 33 and target.exists():
+                        target.unlink()  # The server does not support byte ranges.
+                    elif code not in (6, 7, 18, 28, 35, 52, 55, 56):
+                        raise
+                    if attempt == 2:
+                        raise
+                    time.sleep(attempt + 1)
 
     def _feed_documents(self, plan):
         """Return (repo, path, bytes, decoded_document|None) for signed feeds."""

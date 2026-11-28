@@ -87,6 +87,19 @@ class SignatureTests(LabEnvironment):
             with self.assertRaises(dc.CredentialError):
                 dc.load(scope='plugin.publish', repository='BrOKenAG/ordina-plugin-other')
 
+    def test_expired_scoped_credential_preserves_primary_repository_error(self):
+        repo = 'BrOKenAG/ordina-plugin-new'
+        primary = signed(document(repositories=['BrOKenAG/ordina-plugin-existing']))
+        now = int(time.time())
+        scoped = signed(document(repositories=[repo], issuedAt=now-180, notBefore=now-180, expires=now-1))
+        with patch.dict(os.environ, {'ORDINA_DEV_LAB': '0'}), \
+             patch.object(dc, 'read_raw', return_value=(primary, 'keychain')), \
+             patch.object(dc, '_read_keychain', return_value=scoped), \
+             patch.object(dc, 'verify_raw', side_effect=lambda raw: json.loads(base64.b64decode(json.loads(raw)['payload']))):
+            with self.assertRaises(dc.CredentialError) as result:
+                dc.load(scope='plugin.publish', repository=repo)
+            self.assertEqual(result.exception.code, 'auth.repository')
+
     def test_signed_document_verifies(self):
         value = dc.verify_raw(signed(document()))
         self.assertEqual(value['developer'], 'BrOKenAG')
