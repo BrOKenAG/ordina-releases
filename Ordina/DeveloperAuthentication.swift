@@ -9,15 +9,20 @@ final class DeveloperAuthentication: ObservableObject {
     @Published var deviceTrusted = false
     @Published var busy = false
     @Published var error: String?
+    @Published var authorizationExpired = false
     @Published var setupURI: String?
     private var pending: Data?
     private let session = DeveloperAuthSession.shared
     private var attempts = DeveloperAuthState()
     private var sessionCancellable: AnyCancellable?
+    private var deviceVerificationDeadline: TimeInterval?
     #if ORDINA_LAB
     private var recoveryCheck: (() async throws -> Void)?
-    init(recoveryCheck: (() async throws -> Void)? = nil) {
+    private var authorityCheck: (() async throws -> Void)?
+    init(recoveryCheck: (() async throws -> Void)? = nil,
+         authorityCheck: (() async throws -> Void)? = nil) {
         self.recoveryCheck = recoveryCheck
+        self.authorityCheck = authorityCheck
         attachSession()
     }
     #else
@@ -83,6 +88,9 @@ final class DeveloperAuthentication: ObservableObject {
     }
 
     private func authorize(_ configuration: DeveloperConfiguration) async throws {
+        #if ORDINA_LAB
+        if let authorityCheck { try await authorityCheck(); return }
+        #endif
         guard configuration.toolPath.isEmpty, let installation = DevToolManager.installation(),
               let path = DevToolManager.verifiedPath(configuration) else {
             throw DevBridgeError.response("请先安装可信发布工具。")
@@ -98,6 +106,11 @@ final class DeveloperAuthentication: ObservableObject {
         try await LocalPublisherTool(executable: path, configuration: configuration).authorizeIdentity()
     }
 
+    private func showAuthorizationError(_ error: Error) {
+        authorizationExpired = (error as? DevFailure)?.code == "auth.expired"
+        self.error = authorizationExpired ? "发布授权已过期，请导入重新签发的授权。" : error.localizedDescription
+    }
+
     func beginBinding(_ configuration: DeveloperConfiguration) async {
         guard !busy else { return }
         busy = true; error = nil
@@ -107,9 +120,10 @@ final class DeveloperAuthentication: ObservableObject {
             try await authorize(configuration)
             let secret = try DeveloperAuthKeychain.generateSecret()
             pending = secret
+            authorizationExpired = false
             let encoded = base32(secret)
             setupURI = "otpauth://totp/ordina:Developer?secret=\(encoded)&issuer=ordina&algorithm=SHA1&digits=6&period=30"
-        } catch { self.error = error.localizedDescription }
+        } catch { showAuthorizationError(error) }
     }
 
     func cancelBinding() { pending = nil; setupURI = nil }
@@ -146,8 +160,9 @@ final class DeveloperAuthentication: ObservableObject {
             current = DeveloperAuthRecord(secret: secret, lastCounter: counter)
             try store.save(current!)
             pending = nil; setupURI = nil; bound = true
+            authorizationExpired = false
             session.unlock()
-        } catch { self.error = error.localizedDescription }
+        } catch { showAuthorizationError(error) }
     }
 
     /// Store only a random local token after a full TOTP + official authority
@@ -169,10 +184,20 @@ final class DeveloperAuthentication: ObservableObject {
         busy = true; error = nil
         defer { busy = false }
         do {
-            try await verifyRecovery()
+            let now = ProcessInfo.processInfo.systemUptime
+            if deviceVerificationDeadline.map({ now >= $0 }) ?? true {
+                deviceVerificationDeadline = nil
+                try await verifyRecovery()
+                deviceVerificationDeadline = ProcessInfo.processInfo.systemUptime + 120
+            }
             try await authorize(configuration)
+            deviceVerificationDeadline = nil
+            authorizationExpired = false
             session.unlock()
-        } catch { self.error = error.localizedDescription }
+        } catch {
+            showAuthorizationError(error)
+            if !authorizationExpired { deviceVerificationDeadline = nil }
+        }
     }
 
     func revokeTrust(_ configuration: DeveloperConfiguration) async {
@@ -187,7 +212,7 @@ final class DeveloperAuthentication: ObservableObject {
         } catch { self.error = error.localizedDescription }
     }
 
-    func lock() { session.lock(); cancelBinding() }
+    func lock() { deviceVerificationDeadline = nil; authorizationExpired = false; session.lock(); cancelBinding() }
     func tick() { session.tick() }
 
     func revoke(_ configuration: DeveloperConfiguration) async {
